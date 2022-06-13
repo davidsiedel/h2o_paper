@@ -1,0 +1,45 @@
+@DSL DefaultGenericBehaviour;
+@Behaviour HeatTransfer;
+@Author Jérémy Bleyer;
+@Date 07 / 04 / 2020;
+
+@Includes{
+#include <TFEL/Math/Vector/tvectorIO.hxx>
+}
+
+@Gradient TVector g;
+g.setEntryName("TempGradient");
+@Flux TVector q;
+q.setEntryName("TempFlux");
+
+@Gradient real d;
+d.setEntryName("Temp");
+@Flux real Y;
+Y.setEntryName("EnergyRelease");
+
+@TangentOperatorBlock ∂q∕∂Δg;
+@AdditionalTangentOperatorBlock ∂Y∕∂Δd;
+
+@MaterialProperty real k;
+k.setGlossaryName("ThermalConductivity");
+
+@ExternalStateVariable real Q;
+Q.setEntryName("HeatSource");
+
+@AuxiliaryStateVariable real Qv;
+
+@ProvidesTangentOperator;
+@Integrator {
+  // remove useless warnings, as we always compute the tangent operator
+  static_cast<void>(computeTangentOperator_);
+  ∂q∕∂Δg = - k * tmatrix<N, N, real>::Id();
+  Qv = Q + dQ;
+  ∂Y∕∂Δd = 0.0;
+  q = - k * (g+Δg);
+  std::cout << "q :" << q << std::endl;
+  Y = 0;
+}
+
+//@DissipatedEnergy{
+//Psi_d = Gc/2/l₀*(d*d + l₀*l₀*(g|g));
+//}

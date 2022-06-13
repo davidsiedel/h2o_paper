@@ -1,0 +1,28 @@
+@Author Thomas Helfer;
+@Date   11/02/2021;
+@Description{
+
+};
+
+@ModellingHypothesis 'Axisymmetrical';
+//@ModellingHypothesis 'PlaneStrain';
+@Behaviour<generic> '../behaviour_elasticity_small_strain/src/libBehaviour.so' 'Elasticity';
+
+// external state variable
+@ExternalStateVariable 'Temperature' 293.15;
+
+//@ImposedStrain 'EXX' {
+//  0 : 0,
+//  1 : 7.e-3,
+//  2 : -1.e-2,
+//  3 : 2.e-2,
+//  4 : -3e-2,
+//  5 : 4e-2
+//};
+
+@ImposedStrain 'EZZ' {
+  0 : 0,
+  1 : 0.1
+};
+
+@Times{0, 1 in 1};

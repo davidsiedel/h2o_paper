@@ -1,0 +1,38 @@
+@Behaviour Elasticity;
+@Author Helfer Thomas;
+@Date 23/11/06;
+@Description{
+ A very first test
+ (the most simple one in fact).
+}
+
+// parameters
+//@Parameter young =  70.e9;
+@Parameter young = 1.124999981250001;
+young.setGlossaryName("YoungModulus");
+//@Parameter nu    =   0.34;
+@Parameter nu = 0.4999;
+nu.setGlossaryName("PoissonRatio");
+
+// Lame Coefficients
+@LocalVariable stress lambda,mu;
+
+@InitLocalVariables{
+  lambda = computeLambda(young,nu);
+  mu = computeMu(young,nu);
+}
+
+@PredictionOperator{
+  static_cast<void>(smt); // remove unused variable warning
+  computeAlteredElasticStiffness<hypothesis,real>::exe(Dt,lambda,mu);
+}
+
+@Integrator{
+  sig = lambda * trace(eto + deto) * StrainStensor::Id() + //
+        2 * mu * (eto + deto);
+}
+
+@TangentOperator{
+  static_cast<void>(smt); // remove unused variable warning
+  Dt = lambda * Stensor4::IxI() + 2 * mu * Stensor4::Id();
+}
