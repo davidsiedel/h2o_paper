@@ -6,6 +6,7 @@
 # spack load py-scipy@1.8.0
 # spack load py-matplotlib@3.4.3
 
+import tfel.math
 import numpy as np
 
 from h2o.problem.problem import Problem
@@ -85,7 +86,7 @@ mesh_file_path = "meshes/cook_32_quadrangles_structured.msh"
 mesh_file_path = "meshes/cook_20_quadrangles_structured.msh"
 # mesh_file_path = "meshes2/cook_soda_45.msh"
 # mesh_file_path = "meshes2/cook_45_quadrangles_structured2.msh"
-# mesh_file_path = "meshes2/cook_5.msh"
+mesh_file_path = "meshes/cook_10_quadrangles_structured.msh"
 
 # --- FIELD
 displacement = Field(label="U", field_type=FieldType.DISPLACEMENT_LARGE_STRAIN_PLANE_STRAIN)

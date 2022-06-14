@@ -1,0 +1,26 @@
+import tfel.math
+
+
+
+nit = 3
+freq = 1
+
+# avant les itérations
+
+acceleration_u = tfel.math.UAnderson(nit, freq)
+
+
+
+# au début de chaque iteration
+
+
+
+acceleration_u.initialize(u_field)
+
+
+
+# à la fin de chaque itération
+
+
+
+acceleration_u.accelerate(u_field)

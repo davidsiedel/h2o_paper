@@ -1,6 +1,8 @@
 import time
 from typing import TextIO
 
+import tfel
+import tfel.math
 import numpy as np
 
 from h2o.problem.problem import Problem, clean_res_dir
@@ -13,7 +15,6 @@ from scipy.sparse import csr_matrix
 import matplotlib.pyplot as plt
 import sys
 np.set_printoptions(edgeitems=3, infstr='inf', linewidth=1000, nanstr='nan', precision=6,suppress=True, threshold=sys.maxsize, formatter=None)
-
 
 def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbose: bool = False, debug_mode: DebugMode = DebugMode.NONE):
     clean_res_dir(problem.res_folder_path)
@@ -81,6 +82,8 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
             raise ArithmeticError("the number of quadrature points is not right : qp in mesh {} | qp_final {}".format(problem.mesh.number_of_cell_quadrature_points_in_mesh, qp_final))
         print("+ NUMBER OF INTEGRATION POINTS : {}".format(problem.mesh.number_of_cell_quadrature_points_in_mesh))
         write_out_msg("+ NUMBER OF INTEGRATION POINTS : {}".format(problem.mesh.number_of_cell_quadrature_points_in_mesh))
+        # --- INITIALIZE FIRST MATRIX FLAG
+        is_first_iteration: bool = True
         # --- TIME STEP INIT
         time_step_index: int = 0
         time_step_temp: float = problem.time_steps[0]
@@ -138,6 +141,7 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
                     local_face_unknown_vectors: List[ndarray] = [np.copy(faces_unknown_vector)]
                     local_time_step_index: int = 0
                     local_max_time_steps: int = 20
+                    count_local_failure: int = 0
                     local_face_unknown_vector_previous_step: ndarray = np.copy(faces_unknown_vector_previous_step)
                     while local_time_step_index < len(local_face_unknown_vectors) and not break_iteration:
                         local_time_step_tic = time.time()
@@ -146,6 +150,32 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
                         local_face_unknown_vector: ndarray = local_face_unknown_vectors[local_time_step_index]
                         # print("@ CELL : {} | STEP : {} | FU : {}".format(_element_index, local_time_step_index, local_face_unknown_vector))
                         while local_iteration < local_max_iteration and not break_iteration and not break_local_iteration:
+                            nit = 3
+                            freq = 1
+                            acceleration_u = tfel.math.UAnderson(nit, freq)
+                            # --- INIT PREDICTION
+                            # cell_field_vals: ndarray = np.zeros(element.field.field_dimension, )
+                            # for field_direction in range(element.field.field_dimension):
+                            #     cell_field_vals[field_direction] = element.get_cell_field_value(local_face_unknown_vector, _x_q_c, field_direction)
+                            acceleration_u.initialize(element.cell_unknown_vector)
+                            # COMPUTE PREDICTION
+                            # _io = problem.finite_element.computation_integration_order
+                            # cell_quadrature_size = element.cell.get_quadrature_size(
+                            #     _io, quadrature_type=problem.quadrature_type
+                            # )
+                            # cell_quadrature_points = element.cell.get_quadrature_points(
+                            #     _io, quadrature_type=problem.quadrature_type
+                            # )
+                            # cell_quadrature_weights = element.cell.get_quadrature_weights(
+                            #     _io, quadrature_type=problem.quadrature_type
+                            # )
+                            # for _qc in range(cell_quadrature_size):
+                            #     _qp = element.quad_p_indices[_qc]
+                            #     _w_q_c = cell_quadrature_weights[_qc]
+                            #     _x_q_c = cell_quadrature_points[:, _qc]
+                            #     for derivative_direction in range(element.field.euclidean_dimension):
+                            #         grad_vector: ndarray = element.finite_element.cell_basis_l.evaluate_derivative(_x_q_c, x_c, bdc, derivative_direction)
+                            #         for field_direction in range(element.field.field_dimension):
                             local_iteration_tic = time.time()
                             # --- INITIALIZE MATRIX AND VECTORS
                             element_stiffness_matrix = np.zeros((element.element_size, element.element_size), dtype=real)
@@ -280,6 +310,9 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
                                     # element.cell_unknown_vector += cell_correction
                                     # break_iteration = True
                                     break_local_iteration = True
+                                    count_local_failure += 1
+                                    if count_local_failure == 150:
+                                        break_iteration = True
                                     # print(
                                     #     "++++++++++++ @ CELL : {} | MAX ITER".format(
                                     #         _element_index))
@@ -316,6 +349,8 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
                             if local_iteration_time > max_local_iteration_time:
                                 max_local_iteration_time = local_iteration_time
                             sum_local_iteration_time += local_iteration_time
+                            # --- MAKE PREDICTION
+                            acceleration_u.accelerate(element.cell_unknown_vector)
                         # --- END LOCAL TIME STEP
                         mean_local_iteration_time += sum_local_iteration_time / float(cnt_local_iteration)
                         cnt_local_time_step += 1
