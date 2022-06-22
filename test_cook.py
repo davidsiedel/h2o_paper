@@ -6,6 +6,7 @@
 # spack load py-scipy@1.8.0
 # spack load py-matplotlib@3.4.3
 
+import enum
 import tfel.math
 import numpy as np
 
@@ -26,11 +27,17 @@ from h2o.problem.resolution.local_equilibrium import solve_newton_local_equilibr
 from h2o.problem.resolution.local_equilibrium2 import solve_newton_local_equilibrium2
 from h2o.problem.resolution.local_equilibrium_3 import solve_newton_local_equilibrium3
 from h2o.problem.resolution.local_equilibrium_4 import solve_newton_local_equilibrium4
+from h2o.problem.solve.solve_implicit import solve_implicit
+from h2o.problem.solve.solve_condensation import solve_condensation
 
 # --- VALUES
 P_min = 0.0
 P_mid = 1.4e8
 P_max = 5.e6 / (16.e-3)
+P_max = (156250000.0 + 5.e6 / (16.e-3))/2
+# P_max = 204326923.0769231
+# P_max = 200000000.0
+# P_max = 5.e6 / (16.e-3)
 # P_max = 5.e3 / (16.e-3)
 # P_max = 3.e8
 # P_min = 0.01
@@ -39,14 +46,15 @@ P_max = 5.e6 / (16.e-3)
 time_steps_0 = np.linspace(P_min, P_mid, 15).tolist()
 time_steps_1 = np.linspace(P_mid, P_max, 150).tolist()
 time_steps = time_steps_0 + time_steps_1
+# time_steps = np.linspace(P_min, P_max, 20)[:-3]
 # time_steps = np.linspace(P_min, 1.5e8, 15)
 print("PMAX : {:.6E}".format(P_max))
-# time_steps = np.linspace(P_min, P_max, 40)
+time_steps = np.linspace(P_min, P_max, 50)
 # time_steps = np.linspace(0.0, 0.004, 25)
 # time_steps = list(time_steps) + [P_max]
 time_steps = list(time_steps)
 print(time_steps)
-iterations = 10
+iterations = 500
 
 # --- LOAD
 def volumetric_load(time: float, position: ndarray):
@@ -99,6 +107,9 @@ finite_element = FiniteElement(
     basis_type=BasisType.MONOMIAL,
 )
 
+algorithm_type = "STATIC"
+algorithm_type = "IMPLICIT"
+
 # --- PROBLEM
 p = Problem(
     mesh_file_path=mesh_file_path,
@@ -109,12 +120,12 @@ p = Problem(
     boundary_conditions=boundary_conditions,
     loads=loads,
     quadrature_type=QuadratureType.GAUSS,
-    tolerance=1.0e-6,
-    res_folder_path=get_current_res_folder_path() + "_SEMTEAM_CELL_EQ_TEST"
+    tolerance=1.0e-3,
+    res_folder_path=get_current_res_folder_path() + "_" + algorithm_type
 )
 
 # --- MATERIAL
-parameters = {"YoungModulus": 206.9e9, "PoissonRatio": 0.29}
+parameters = {"YoungModulus": 206.9e9, "PoissonRatio": 0.499}
 stabilization_parameter = 0.00005 * parameters["YoungModulus"] / (1.0 + parameters["PoissonRatio"]) #GOOD
 # stabilization_parameter = 0.05 * parameters["YoungModulus"] / (1.0 + parameters["PoissonRatio"]) #GOOD
 stabilization_parameter = 1.0 * parameters["YoungModulus"] / (1.0 + parameters["PoissonRatio"])
@@ -127,12 +138,18 @@ mat = Material(
     stabilization_parameter=stabilization_parameter,
     lagrange_parameter=parameters["YoungModulus"],
     field=displacement,
+    integration_type=mgis.behaviour.IntegrationType.IntegrationWithElasticOperator,
     parameters=None,
 )
 
 # --- SOLVE
-# solve_newton_static_condensation(p, mat, verbose=False, debug_mode=DebugMode.NONE)
 # solve_newton_local(p, mat, verbose=False, debug_mode=DebugMode.NONE)
 # solve_newton_static_condensation(p, mat, verbose=False, debug_mode=DebugMode.NONE)
 # solve_newton(p, mat, SolverType.CELL_EQUILIBRIUM)
-solve_newton_local_equilibrium4(p, mat, verbose=False, debug_mode=DebugMode.NONE)
+# solve_implicit(p, mat, verbose=False, debug_mode=DebugMode.NONE)
+# solve_condensation(p, mat, verbose=False, debug_mode=DebugMode.NONE)
+if algorithm_type == "STATIC":
+    solve_condensation(p, mat, verbose=False, debug_mode=DebugMode.NONE)
+elif algorithm_type == "IMPLICIT":
+    solve_implicit(p, mat, verbose=False, debug_mode=DebugMode.NONE)
+    

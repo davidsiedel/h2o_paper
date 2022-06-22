@@ -1,0 +1,25 @@
+@DSL Implicit;
+
+@Behaviour SmallStrainVocePlasticity;
+@Author Thomas Helfer;
+@Date 02 / 04 / 2021;
+@Description {
+}
+
+@ModellingHypotheses{".+"};
+
+@Algorithm NewtonRaphson;
+@Epsilon 1.e-14;
+@Theta 1;
+
+@Brick StandardElastoViscoPlasticity{
+  stress_potential : "Hooke" {
+    young_modulus : 206.9e9,
+    poisson_ratio : 0.499
+  },
+  inelastic_flow : "Plastic" {
+    criterion : "Mises",
+    isotropic_hardening : "Voce" {R0 : 450.e6, Rinf : 715.e6, b : 16.93},
+    isotropic_hardening : "Linear" {R0 : 0., H : 129.2e6}
+  }
+};

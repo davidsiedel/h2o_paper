@@ -3,6 +3,9 @@ from typing import TextIO
 
 import tfel
 import tfel.math
+
+from mgis.behaviour import IntegrationType
+
 import numpy as np
 
 from h2o.problem.problem import Problem, clean_res_dir
@@ -16,7 +19,8 @@ import matplotlib.pyplot as plt
 import sys
 np.set_printoptions(edgeitems=3, infstr='inf', linewidth=1000, nanstr='nan', precision=6,suppress=True, threshold=sys.maxsize, formatter=None)
 
-def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbose: bool = False, debug_mode: DebugMode = DebugMode.NONE):
+
+def solve_implicit(problem: Problem, material: Material, verbose: bool = False, debug_mode: DebugMode = DebugMode.NONE, accelerate:bool = True):
     clean_res_dir(problem.res_folder_path)
     problem.create_output(problem.res_folder_path)
     output_file_path = os.path.join(problem.res_folder_path, "output.txt")
@@ -51,6 +55,12 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
     cnt_global_iteration: int = 0
     cnt_local_time_step: int = 0
     cnt_local_iteration: int = 0
+    # 
+    # 
+    # 
+    num_total_skeleton_iterations = 0
+    num_total_skeleton_time_steps = 0
+    num_cell_iterations = 0
     with open(output_file_path, "a") as outfile:
 
         def write_out_msg(msg: str):
@@ -82,8 +92,6 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
             raise ArithmeticError("the number of quadrature points is not right : qp in mesh {} | qp_final {}".format(problem.mesh.number_of_cell_quadrature_points_in_mesh, qp_final))
         print("+ NUMBER OF INTEGRATION POINTS : {}".format(problem.mesh.number_of_cell_quadrature_points_in_mesh))
         write_out_msg("+ NUMBER OF INTEGRATION POINTS : {}".format(problem.mesh.number_of_cell_quadrature_points_in_mesh))
-        # --- INITIALIZE FIRST MATRIX FLAG
-        is_first_iteration: bool = True
         # --- TIME STEP INIT
         time_step_index: int = 0
         time_step_temp: float = problem.time_steps[0]
@@ -103,18 +111,20 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
             write_out_msg("+ TIME_STEP : {} | LOAD_VALUE : {}".format(time_step_index, time_step))
             iteration: int = 0
             break_iteration: bool = False
+            # --------------------------------------------------------------------------------------------------
+            # INIT ANDERSON ACCELERATION
+            # --------------------------------------------------------------------------------------------------
+            nit = 10
+            freq = 1
+            acceleration_u = tfel.math.UAnderson(nit, freq)
+            acceleration_u.initialize(faces_unknown_vector)
             while iteration < problem.number_of_iterations and not break_iteration:
                 global_iteration_tic = time.time()
                 mean_iteration_num: float = 0.0
                 # --------------------------------------------------------------------------------------------------
                 # SET SYSTEM MATRIX AND VECTOR
                 # --------------------------------------------------------------------------------------------------
-                if iteration == 0:
-                    tangent_matrix: ndarray = np.zeros((_constrained_system_size, _constrained_system_size), dtype=real)
-                else:
-                    # tangent_matrix[: _system_size, _system_size :] = np.zeros(_constrained_system_size, _constrained_system_size)
-                    tangent_matrix[_system_size :, : _system_size] = np.zeros((_constrained_system_size - _system_size, _system_size))
-                    tangent_matrix[: _system_size, _system_size :] = np.zeros((_system_size, _constrained_system_size - _system_size))
+                tangent_matrix: ndarray = np.zeros((_constrained_system_size, _constrained_system_size), dtype=real)
                 residual: ndarray = np.zeros((_constrained_system_size), dtype=real)
                 # --------------------------------------------------------------------------------------------------
                 # SET TIME INCREMENT
@@ -123,13 +133,6 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
                     _dt: float = time_step
                 else:
                     _dt: float = time_step - problem.time_steps[time_step_index - 1]
-                # --------------------------------------------------------------------------------------------------
-                # INIT ANDERSON ACCELERATION
-                # --------------------------------------------------------------------------------------------------
-                nit = 3
-                freq = 1
-                acceleration_u = tfel.math.UAnderson(nit, freq)
-                acceleration_u.initialize(faces_unknown_vector)
                 # --------------------------------------------------------------------------------------------------
                 # FOR ELEMENT LOOP
                 # --------------------------------------------------------------------------------------------------
@@ -143,7 +146,8 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
                     _nf: int = len(element.faces)
                     _c0_c: int = _dx * _cl
                     # --- INITIALIZE CELL LOOP
-                    local_max_iteration: int = 10
+                    count_local_failure: int = 0
+                    local_max_iteration: int = 100
                     local_tolerance: float = 1.e-6
                     break_local_iteration: bool = False
                     cell_correction_previous_iteration: ndarray = np.zeros((_cl * _dx), dtype=real)
@@ -153,7 +157,6 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
                     local_face_unknown_vectors: List[ndarray] = [np.copy(faces_unknown_vector)]
                     local_time_step_index: int = 0
                     local_max_time_steps: int = 20
-                    count_local_failure: int = 0
                     local_face_unknown_vector_previous_step: ndarray = np.copy(faces_unknown_vector_previous_step)
                     while local_time_step_index < len(local_face_unknown_vectors) and not break_iteration:
                         local_time_step_tic = time.time()
@@ -162,24 +165,6 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
                         local_face_unknown_vector: ndarray = local_face_unknown_vectors[local_time_step_index]
                         # print("@ CELL : {} | STEP : {} | FU : {}".format(_element_index, local_time_step_index, local_face_unknown_vector))
                         while local_iteration < local_max_iteration and not break_iteration and not break_local_iteration:
-                            # COMPUTE PREDICTION
-                            # _io = problem.finite_element.computation_integration_order
-                            # cell_quadrature_size = element.cell.get_quadrature_size(
-                            #     _io, quadrature_type=problem.quadrature_type
-                            # )
-                            # cell_quadrature_points = element.cell.get_quadrature_points(
-                            #     _io, quadrature_type=problem.quadrature_type
-                            # )
-                            # cell_quadrature_weights = element.cell.get_quadrature_weights(
-                            #     _io, quadrature_type=problem.quadrature_type
-                            # )
-                            # for _qc in range(cell_quadrature_size):
-                            #     _qp = element.quad_p_indices[_qc]
-                            #     _w_q_c = cell_quadrature_weights[_qc]
-                            #     _x_q_c = cell_quadrature_points[:, _qc]
-                            #     for derivative_direction in range(element.field.euclidean_dimension):
-                            #         grad_vector: ndarray = element.finite_element.cell_basis_l.evaluate_derivative(_x_q_c, x_c, bdc, derivative_direction)
-                            #         for field_direction in range(element.field.field_dimension):
                             local_iteration_tic = time.time()
                             # --- INITIALIZE MATRIX AND VECTORS
                             element_stiffness_matrix = np.zeros((element.element_size, element.element_size), dtype=real)
@@ -205,6 +190,7 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
                                 # --- INTEGRATE BEHAVIOUR LAW
                                 # print("!!!! INTEGRATION START @ point : {}".format(_qp))
                                 integ_res = mgis_bv.integrate(material.mat_data, material.integration_type, _dt, _qp, (_qp + 1))
+                                # integ_res = mgis_bv.integrate(material.mat_data, IntegrationType.IntegrationWithConsistentTangentOperator, _dt, _qp, (_qp + 1))
                                 # print("!!!! INTEGRATION STOP @ point : {}".format(_qp))
                                 if integ_res != 1:
                                     # print("++++++++++++++++ @ CELL : {} | INTEG_RES FAILURE @ QUAD POINT {} WITH STRAIN {}".format(_element_index, _qp2, transformation_gradient))
@@ -285,43 +271,70 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
                                     #     "++++++++++++ @ CELL : {} | CONVERGENCE AT ITER {}".format(
                                     #         _element_index, local_iteration))
                                 elif local_iteration == local_max_iteration - 1:
+                                    # print("Cell failure")
+                                    # 
+                                    # 
+                                    # 
+                                    # 
+                                    _nf = len(element.faces)
+                                    face_correction = np.zeros((_nf * _fk * _dx), dtype=real)
+                                    for _i_local, _i_global in enumerate(element.faces_indices):
+                                        _c0_fg = _i_global * (_fk * _dx)
+                                        _c1_fg = (_i_global + 1) * (_fk * _dx)
+                                        _c0_fl = _i_local * (_fk * _dx)
+                                        _c1_fl = (_i_local + 1) * (_fk * _dx)
+                                        face_correction[_c0_fl:_c1_fl] += correction[_c0_fg:_c1_fg]
+                                    cell_correction = element.m_cell_cell_inv @ (
+                                            element.v_cell - element.m_cell_faces @ face_correction
+                                    )
+                                    # --- ADDING CORRECTION TO CURRENT DISPLACEMENT
+                                    element.cell_unknown_vector = np.copy(element.local_cell_unknown_vector_backup)
+                                    element.cell_unknown_vector += cell_correction
+                                    # 
+                                    # 
+                                    # 
+                                    # 
                                     # print("@ CELL : {} | MAX ITER AT STEP : {}".format(_element_index, local_time_step_index))
                                     # print("@ CELL : {} | SPLIT TIME STEP".format(_element_index))
-                                    
-                                    # print("@ CELL : {} | local_face_unknown_vector_previous_step : {}".format(_element_index, local_face_unknown_vector_previous_step))
-                                    # print("@ CELL : {} | local_face_unknown_vectors[{}] : {}".format(_element_index, local_time_step_index, local_face_unknown_vectors[local_time_step_index]))
-                                    # insertcorr = faces_unknown_vector_previous_step + (local_face_unknown_vectors[local_time_step_index] - faces_unknown_vector_previous_step) / 2.0
+                                    # # print("@ CELL : {} | local_face_unknown_vector_previous_step : {}".format(_element_index, local_face_unknown_vector_previous_step))
+                                    # # print("@ CELL : {} | local_face_unknown_vectors[{}] : {}".format(_element_index, local_time_step_index, local_face_unknown_vectors[local_time_step_index]))
+                                    # # insertcorr = faces_unknown_vector_previous_step + (local_face_unknown_vectors[local_time_step_index] - faces_unknown_vector_previous_step) / 2.0
+                                    # # insertcorr = local_face_unknown_vector_previous_step + (local_face_unknown_vector - local_face_unknown_vector_previous_step) / 2.0
                                     # insertcorr = local_face_unknown_vector_previous_step + (local_face_unknown_vector - local_face_unknown_vector_previous_step) / 2.0
-                                    insertcorr = local_face_unknown_vector_previous_step + (local_face_unknown_vector - local_face_unknown_vector_previous_step) / 2.0
-                                    # insertcorr = faces_unknown_vector_previous_step + correction / 2.0
-                                    local_face_unknown_vectors.insert(local_time_step_index, insertcorr)
-                                    # print("@ CELL : {} | local_face_unknown_vectors[{}] AFTER SPLIT : {}".format(_element_index, local_time_step_index, local_face_unknown_vectors[local_time_step_index]))
-                                    element.cell_unknown_vector = np.copy(element.local_cell_unknown_vector_backup)
-                                    # print("@ CELL : {} | DIFF {:.6E}".format(_element_index, np.max(np.abs(local_face_unknown_vector - local_face_unknown_vector_previous_step))))
-                                    # print("--- END")
-                                    # --- DECOND
-                                    # element.cell_unknown_vector = np.copy(element.cell_unknown_vector_backup)
-                                    # face_correction = np.zeros((_nf * _fk * _dx), dtype=real)
-                                    # for _i_local, _i_global in enumerate(element.faces_indices):
-                                    #     _c0_fg = _i_global * (_fk * _dx)
-                                    #     _c1_fg = (_i_global + 1) * (_fk * _dx)
-                                    #     _c0_fl = _i_local * (_fk * _dx)
-                                    #     _c1_fl = (_i_local + 1) * (_fk * _dx)
-                                    #     face_correction[_c0_fl:_c1_fl] += correction[_c0_fg:_c1_fg]
-                                    # cell_correction = element.m_cell_cell_inv @ (
-                                    #         element.v_cell - element.m_cell_faces @ face_correction
-                                    # )
-                                    # # --- ADDING CORRECTION TO CURRENT DISPLACEMENT
-                                    # element.cell_unknown_vector += cell_correction
-                                    # break_iteration = True
+                                    # # insertcorr = faces_unknown_vector_previous_step + correction / 2.0
+                                    # local_face_unknown_vectors.insert(local_time_step_index, insertcorr)
+                                    # # print("@ CELL : {} | local_face_unknown_vectors[{}] AFTER SPLIT : {}".format(_element_index, local_time_step_index, local_face_unknown_vectors[local_time_step_index]))
+                                    # element.cell_unknown_vector = np.copy(element.local_cell_unknown_vector_backup)
+                                    # # print("@ CELL : {} | DIFF {:.6E}".format(_element_index, np.max(np.abs(local_face_unknown_vector - local_face_unknown_vector_previous_step))))
+                                    # # print("--- END")
+                                    # # --- DECOND
+                                    # # element.cell_unknown_vector = np.copy(element.cell_unknown_vector_backup)
+                                    # # face_correction = np.zeros((_nf * _fk * _dx), dtype=real)
+                                    # # for _i_local, _i_global in enumerate(element.faces_indices):
+                                    # #     _c0_fg = _i_global * (_fk * _dx)
+                                    # #     _c1_fg = (_i_global + 1) * (_fk * _dx)
+                                    # #     _c0_fl = _i_local * (_fk * _dx)
+                                    # #     _c1_fl = (_i_local + 1) * (_fk * _dx)
+                                    # #     face_correction[_c0_fl:_c1_fl] += correction[_c0_fg:_c1_fg]
+                                    # # cell_correction = element.m_cell_cell_inv @ (
+                                    # #         element.v_cell - element.m_cell_faces @ face_correction
+                                    # # )
+                                    # # # --- ADDING CORRECTION TO CURRENT DISPLACEMENT
+                                    # # element.cell_unknown_vector += cell_correction
+                                    # # break_iteration = True
+                                    # 
+                                    # 
+                                    # 
+                                    # 
                                     break_local_iteration = True
                                     count_local_failure += 1
-                                    if count_local_failure == 150:
+                                    if count_local_failure == 3:
                                         break_iteration = True
                                     # print(
                                     #     "++++++++++++ @ CELL : {} | MAX ITER".format(
                                     #         _element_index))
                                 else:
+                                    # print("Cell update")
                                     cell_correction = np.linalg.solve(-K_cc, R_cc)
                                     cell_correction_previous_iteration = cell_correction_temp
                                     cell_correction_temp = cell_correction
@@ -338,6 +351,7 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
                                     # )
                                     # print(np.max(np.abs(cell_correction - cell_correction_cond)))
                                     local_iteration += 1
+                                    num_cell_iterations += 1
                             else:
                                 insertcorr = local_face_unknown_vector_previous_step + (
                                             local_face_unknown_vector - local_face_unknown_vector_previous_step) / 2.0
@@ -355,6 +369,7 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
                                 max_local_iteration_time = local_iteration_time
                             sum_local_iteration_time += local_iteration_time
                         # --- END LOCAL TIME STEP
+                        # print("local iters : {}".format(local_iteration))
                         mean_local_iteration_time += sum_local_iteration_time / float(cnt_local_iteration)
                         cnt_local_time_step += 1
                         local_time_step_toc = time.time()
@@ -365,6 +380,7 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
                             max_local_time_step_time = local_time_step_time
                         sum_local_time_step_time += local_time_step_time
                     # --- END OF ELEMENT LOCAL RESOLUTION
+                    # print("local time steps : {}".format(local_time_step_index))
                     mean_local_iteration_time /= float(cnt_local_time_step)
                     mean_local_time_step_time += sum_local_time_step_time / float(cnt_local_time_step)
                     # if local_time_step_index == local_max_time_steps:
@@ -524,14 +540,18 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
                                 _cg1 = (_j_global + 1) * (_fk * _dx)
                                 _ce0 = _j_local * (_fk * _dx)
                                 _ce1 = (_j_local + 1) * (_fk * _dx)
-                                if iteration == 0:
-                                    tangent_matrix[_rg0:_rg1, _cg0:_cg1] += K_cond[_re0:_re1, _ce0:_ce1]
+                                tangent_matrix[_rg0:_rg1, _cg0:_cg1] += K_cond[_re0:_re1, _ce0:_ce1]
                         # --- SET EXTERNAL FORCES COEFFICIENT
                         if np.max(np.abs(element_external_forces)) > external_forces_coefficient:
                             external_forces_coefficient = np.max(np.abs(element_external_forces))
                     else:
                         break
                 if not break_iteration:
+                    # print(num_cell_iterations/len(problem.elements))
+                    res_num_cell_iters = float(num_cell_iterations)/float(len(problem.elements))
+                    # write_out_msg("++++ ITER : {} | NUM CELL ITERATIONS".format(res_num_cell_iters))
+                    # write_out_msg("++++ ITER : {} | NUM CELL ITERATIONS".format(str(res_num_cell_iters).zfill(10)))
+                    num_cell_iterations = 0
                     # print("++++ ITER : {} | CONVERGENCE ACHIEVED IN CELLS".format(str(iteration).zfill(4)))
                     # print(
                     #     "++++ ITER : {} | MEAN ITERATIONS : {:.6E}".format(
@@ -548,11 +568,11 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
                     residual_evaluation = np.max(np.abs(residual)) / external_forces_coefficient
                     if residual_evaluation < problem.tolerance:
                         print(
-                            "++++ ITER : {} | RES_MAX : {:.6E} | TOLERANCE {:.6E} | CONVERGENCE".format(
-                                str(iteration).zfill(4), residual_evaluation, problem.tolerance))
+                            "++++ ITER : {} | RES_MAX : {:.6E} | TOLERANCE {:.6E} | NUM CELL ITERATIONS {:.6E} | CONVERGENCE".format(
+                                str(iteration).zfill(4), residual_evaluation, res_num_cell_iters, problem.tolerance))
                         write_out_msg(
-                            "++++ ITER : {} | RES_MAX : {:.6E} | TOLERANCE {:.6E} | CONVERGENCE".format(
-                                str(iteration).zfill(4), residual_evaluation, problem.tolerance))
+                            "++++ ITER : {} | RES_MAX : {:.6E} | TOLERANCE {:.6E} | NUM CELL ITERATIONS {:.6E} | CONVERGENCE".format(
+                                str(iteration).zfill(4), residual_evaluation, res_num_cell_iters, problem.tolerance))
                         # --- UPDATE INTERNAL VARIABLES
                         mgis_bv.update(material.mat_data)
                         print("+ ITERATIONS : {}".format(iteration + 1))
@@ -562,16 +582,16 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
                             if bc.boundary_type == BoundaryType.DISPLACEMENT:
                                 bc.force_values.append(bc.force)
                                 bc.time_values.append(time_step)
-                        problem.create_vertex_res_files(problem.res_folder_path, file_suffix)
-                        problem.create_quadrature_points_res_files(problem.res_folder_path, file_suffix, material)
-                        problem.write_vertex_res_files(problem.res_folder_path, file_suffix, faces_unknown_vector)
-                        problem.write_quadrature_points_res_files(problem.res_folder_path, file_suffix, material,
-                                                                  faces_unknown_vector)
-                        # problem.create_output(problem.res_folder_path)
+                        # problem.create_vertex_res_files(problem.res_folder_path, file_suffix)
+                        # problem.create_quadrature_points_res_files(problem.res_folder_path, file_suffix, material)
+                        # problem.write_vertex_res_files(problem.res_folder_path, file_suffix, faces_unknown_vector)
+                        # problem.write_quadrature_points_res_files(problem.res_folder_path, file_suffix, material,
+                        #                                           faces_unknown_vector)
                         if not material.behaviour_name in ["Elasticity", "Signorini"]:
                             problem.fill_quadrature_internal_variables_output(
                                 problem.res_folder_path, "INTERNAL_VARIABLES", time_step_index, time_step, material
                             )
+                        # problem.create_output(problem.res_folder_path)
                         problem.fill_quadrature_stress_output(problem.res_folder_path, "CAUCHY_STRESS",
                                                               time_step_index, time_step, material)
                         problem.fill_quadrature_strain_output(problem.res_folder_path, "STRAIN", time_step_index,
@@ -588,12 +608,13 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
                         iteration = 0
                         time_step_temp = time_step + 0.
                         time_step_index += 1
+                        num_total_skeleton_time_steps += 1
                         break_iteration = True
                     elif iteration == problem.number_of_iterations - 1:
-                        print("++++ ITER : {} | RES_MAX : {:.6E} | SPLITTING TIME STEP".format(
-                            str(iteration).zfill(4), residual_evaluation))
-                        write_out_msg("++++ ITER : {} | RES_MAX : {:.6E} | SPLITTING TIME STEP".format(
-                            str(iteration).zfill(4), residual_evaluation))
+                        print("++++ ITER : {} | RES_MAX : {:.6E} | NUM CELL ITERATIONS {:.6E} | SPLITTING TIME STEP".format(
+                            str(iteration).zfill(4), res_num_cell_iters, residual_evaluation))
+                        write_out_msg("++++ ITER : {} | RES_MAX : {:.6E} | NUM CELL ITERATIONS {:.6E} | SPLITTING TIME STEP".format(
+                            str(iteration).zfill(4), res_num_cell_iters, residual_evaluation))
                         problem.time_steps.insert(time_step_index, (time_step + time_step_temp) / 2.)
                         faces_unknown_vector = np.copy(faces_unknown_vector_previous_step)
                         for element in problem.elements:
@@ -605,22 +626,22 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
                         # print("++++ ITER : {} | RES_MAX : {:.6E} | COND : {:.6E}".format(
                         #     str(iteration).zfill(4), residual_evaluation,
                         #     np.linalg.cond(tangent_matrix)))
-                        print("++++ ITER : {} | RES_MAX : {:.6E}".format(
-                            str(iteration).zfill(4), residual_evaluation))
-                        write_out_msg("++++ ITER : {} | RES_MAX : {:.6E}".format(
-                            str(iteration).zfill(4), residual_evaluation))
+                        print("++++ ITER : {} | RES_MAX : {:.6E} | NUM CELL ITERATIONS {:.6E}".format(
+                            str(iteration).zfill(4), residual_evaluation, res_num_cell_iters))
+                        write_out_msg("++++ ITER : {} | RES_MAX : {:.6E} | NUM CELL ITERATIONS {:.6E}".format(
+                            str(iteration).zfill(4), residual_evaluation, res_num_cell_iters))
                         sparse_global_matrix = csr_matrix(tangent_matrix)
-                        print("++++++++ SOLVING THE SYSTEM")
-                        write_out_msg("++++++++ SOLVING THE SYSTEM")
+                        # print("++++++++ SOLVING THE SYSTEM")
+                        # write_out_msg("++++++++ SOLVING THE SYSTEM")
                         scaling_factor = np.max(np.abs(tangent_matrix))
                         solving_start_time = time.process_time()
                         correction = spsolve(sparse_global_matrix / scaling_factor, residual / scaling_factor)
                         solving_end_time = time.process_time()
                         system_check = np.max(np.abs(tangent_matrix @ correction - residual))
-                        print("++++++++ SYSTEM SOLVED IN : {:.6E}s | SYSTEM CHECK : {:.6E}".format(
-                            solving_end_time - solving_start_time, system_check))
-                        write_out_msg("++++++++ SYSTEM SOLVED IN : {:.6E}s | SYSTEM CHECK : {:.6E}".format(
-                            solving_end_time - solving_start_time, system_check))
+                        # print("++++++++ SYSTEM SOLVED IN : {:.6E}s | SYSTEM CHECK : {:.6E}".format(
+                        #     solving_end_time - solving_start_time, system_check))
+                        # write_out_msg("++++++++ SYSTEM SOLVED IN : {:.6E}s | SYSTEM CHECK : {:.6E}".format(
+                        #     solving_end_time - solving_start_time, system_check))
                         faces_unknown_vector += correction
                         # --- DECONDENSATION
                         for element in problem.elements:
@@ -632,12 +653,16 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
                                 _c0_fl = _i_local * (_fk * _dx)
                                 _c1_fl = (_i_local + 1) * (_fk * _dx)
                                 face_correction[_c0_fl:_c1_fl] += correction[_c0_fg:_c1_fg]
-                            cell_correction = element.m_cell_cell_inv @ (
-                                    element.v_cell - element.m_cell_faces @ face_correction
-                            )
+                            cell_correction = element.m_cell_cell_inv @ (element.v_cell - element.m_cell_faces @ face_correction)
                             # --- ADDING CORRECTION TO CURRENT DISPLACEMENT
                             element.cell_unknown_vector += cell_correction
                         iteration += 1
+                        # --------------------------------------------------------------------------------------------------
+                        # ANDERSON ACCELERATE
+                        # --------------------------------------------------------------------------------------------------
+                        if accelerate:
+                           acceleration_u.accelerate(faces_unknown_vector)
+                        num_total_skeleton_iterations += 1
                 else:
                     print("+ SPLITTING TIME STEP")
                     write_out_msg("+ SPLITTING TIME STEP")
@@ -649,12 +674,12 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
                 # --- END OF ITERATION
                 mean_local_time_step_time /= float(len(problem.elements))
                 mean_local_iteration_time /= float(len(problem.elements))
-                write_out_msg("++++ ITER : {} | MEAN_LOC_TIME_STEP_TIME : {:.6E}".format(str(iteration).zfill(4), mean_local_time_step_time))
-                write_out_msg("++++ ITER : {} | MEAN_LOC_ITERATION_TIME : {:.6E}".format(str(iteration).zfill(4), mean_local_iteration_time))
-                write_out_msg("++++ ITER : {} | MIN_LOC_TIME_STEP_TIME : {:.6E}".format(str(iteration).zfill(4), min_local_time_step_time))
-                write_out_msg("++++ ITER : {} | MIN_LOC_ITERATION_TIME : {:.6E}".format(str(iteration).zfill(4), min_local_iteration_time))
-                write_out_msg("++++ ITER : {} | MAX_LOC_TIME_STEP_TIME : {:.6E}".format(str(iteration).zfill(4), max_local_time_step_time))
-                write_out_msg("++++ ITER : {} | MAX_LOC_ITERATION_TIME : {:.6E}".format(str(iteration).zfill(4), max_local_iteration_time))
+                # write_out_msg("++++ ITER : {} | MEAN_LOC_TIME_STEP_TIME : {:.6E}".format(str(iteration).zfill(4), mean_local_time_step_time))
+                # write_out_msg("++++ ITER : {} | MEAN_LOC_ITERATION_TIME : {:.6E}".format(str(iteration).zfill(4), mean_local_iteration_time))
+                # write_out_msg("++++ ITER : {} | MIN_LOC_TIME_STEP_TIME : {:.6E}".format(str(iteration).zfill(4), min_local_time_step_time))
+                # write_out_msg("++++ ITER : {} | MIN_LOC_ITERATION_TIME : {:.6E}".format(str(iteration).zfill(4), min_local_iteration_time))
+                # write_out_msg("++++ ITER : {} | MAX_LOC_TIME_STEP_TIME : {:.6E}".format(str(iteration).zfill(4), max_local_time_step_time))
+                # write_out_msg("++++ ITER : {} | MAX_LOC_ITERATION_TIME : {:.6E}".format(str(iteration).zfill(4), max_local_iteration_time))
                 cnt_global_iteration += 1
                 global_iteration_toc = time.time()
                 global_iteration_time = global_iteration_toc - global_iteration_tic
@@ -663,11 +688,7 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
                 if global_iteration_time > max_global_iteration_time:
                     max_global_iteration_time = global_iteration_time
                 mean_global_iteration_time += global_iteration_time
-                write_out_msg("++++ ITER : {} | GLOBAL_ITERATION_TIME : {:.6E}".format(str(iteration).zfill(4), global_iteration_time))
-                # --------------------------------------------------------------------------------------------------
-                # ANDERSON ACCELERATE
-                # --------------------------------------------------------------------------------------------------
-                # acceleration_u.accelerate(faces_unknown_vector)
+                # write_out_msg("++++ ITER : {} | GLOBAL_ITERATION_TIME : {:.6E}".format(str(iteration).zfill(4), global_iteration_time))
             # --- END OF TIME STEP
             mean_global_iteration_time /= float(cnt_global_iteration)
             cnt_global_time_step += 1
@@ -677,9 +698,9 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
                 min_global_time_step_time = global_time_step_time
             if global_time_step_time > max_global_time_step_time:
                 max_global_time_step_time = global_time_step_time
-            write_out_msg("+ TIME_STEP : {} | NUM_ITERATIONS : {}".format(str(time_step_index).zfill(4), cnt_global_iteration))
-            write_out_msg("+ TIME_STEP : {} | MEAN_ITERATION_TIME : {:.6E}".format(str(time_step_index).zfill(4), mean_global_iteration_time))
-            write_out_msg("+ TIME_STEP : {} | GLOBAL_TIME_STEP_TIME : {:.6E}".format(str(time_step_index).zfill(4), global_time_step_time))
+            # write_out_msg("+ TIME_STEP : {} | NUM_ITERATIONS : {}".format(str(time_step_index).zfill(4), cnt_global_iteration))
+            # write_out_msg("+ TIME_STEP : {} | MEAN_ITERATION_TIME : {:.6E}".format(str(time_step_index).zfill(4), mean_global_iteration_time))
+            # write_out_msg("+ TIME_STEP : {} | GLOBAL_TIME_STEP_TIME : {:.6E}".format(str(time_step_index).zfill(4), global_time_step_time))
             cnt_global_iteration = 0
             mean_global_iteration_time = 0.0
             mean_global_time_step_time += global_time_step_time
@@ -687,7 +708,9 @@ def solve_newton_local_equilibrium4(problem: Problem, material: Material, verbos
         mean_global_time_step_time /= float(cnt_global_time_step)
         computation_toc = time.time()
         computation_time = computation_toc - computation_tic
-        write_out_msg("+ COMPUTATION | NUM_TIME_STEPS : {}".format(cnt_global_time_step))
-        write_out_msg("+ COMPUTATION | MEAN_TIME_STEP_TIME : {:.6E}".format(mean_global_time_step_time))
-        write_out_msg("+ COMPUTATION GLOBAL TIME : {:.6E}".format(computation_time))
+        # write_out_msg("+ COMPUTATION | NUM_TIME_STEPS : {}".format(cnt_global_time_step))
+        # write_out_msg("+ COMPUTATION | MEAN_TIME_STEP_TIME : {:.6E}".format(mean_global_time_step_time))
+        # write_out_msg("+ COMPUTATION GLOBAL TIME : {:.6E}".format(computation_time))
+        write_out_msg("+ COMPUTATION NUM TIME STEPS : {:.6E}".format(num_total_skeleton_time_steps))
+        write_out_msg("+ COMPUTATION NUM ITERATIONS : {:.6E}".format(num_total_skeleton_iterations))
     # --- CLOSE FILE

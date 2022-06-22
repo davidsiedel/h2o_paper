@@ -1,4 +1,4 @@
-@Behaviour Elasticity;
+@Behaviour LinearThermoElasticity;
 @Author Helfer Thomas;
 @Date 23/11/06;
 @Description{
@@ -6,19 +6,11 @@
  (the most simple one in fact).
 }
 
-//@StrainMeasure Hencky;
-// parameters
-//@Parameter young =  1.0;
-//@Parameter young =  200.e6;
 @Parameter young =  150.e9;
-//@Parameter young = 1.124999981250001;
 young.setGlossaryName("YoungModulus");
 @Parameter thermalexpansion alpha = 1e-6;
 @StaticVariable temperature Tref = 293.15;
-//thermalexpansion.setGlossaryName("ThermalExpension");
 @Parameter nu    =   0.4999;
-//@Parameter nu    =   0.3;
-//@Parameter nu = 0.0;
 nu.setGlossaryName("PoissonRatio");
 
 // Lame Coefficients
@@ -36,7 +28,6 @@ nu.setGlossaryName("PoissonRatio");
 
 @Integrator{
   constexpr const auto id = Stensor::Id();
-//  const auto eth = (alpha / 3) * (T + dT - Tref) * id;
   const auto eth = alpha * (T + dT - Tref) * id;
   const auto e = eto + deto - eth;
   sig = lambda * trace(e) * id + 2 * mu * e;

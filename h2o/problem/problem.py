@@ -251,6 +251,9 @@ class Problem:
                 count += 1
         return count
 
+    def get_cell_system_size(self) -> int:
+        return self.mesh.number_of_cells_in_mesh * self.finite_element.cell_basis_l.dimension
+
     def get_total_system_size(self) -> (int, int):
         """
 
