@@ -16,7 +16,7 @@
 @Brick StandardElastoViscoPlasticity{
   stress_potential : "Hooke" {
     young_modulus : 206.9e9,
-    poisson_ratio : 0.499
+    poisson_ratio : 0.29
   },
   inelastic_flow : "Plastic" {
     criterion : "Mises",

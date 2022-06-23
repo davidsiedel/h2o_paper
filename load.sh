@@ -1,0 +1,1 @@
+spack load tfel && spack load mgis && spack load python@3.9.9 && spack load py-numpy@1.21.3 && spack load py-scipy@1.8.0 && spack load py-matplotlib@3.4.3

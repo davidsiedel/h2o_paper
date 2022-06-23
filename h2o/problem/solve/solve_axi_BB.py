@@ -1,8 +1,4 @@
 import time
-from tracemalloc import stop
-
-import tfel
-import tfel.math
 
 import numpy as np
 
@@ -20,12 +16,10 @@ np.set_printoptions(edgeitems=3, infstr='inf', linewidth=1000, nanstr='nan', pre
 from h2o.problem.output import create_output_txt
 
 
-def solve_condensation(problem: Problem, material: Material, verbose: bool = False, debug_mode: DebugMode = DebugMode.NONE, accelerate:int = 0):
+def solve_condensation(problem: Problem, material: Material, verbose: bool = False, debug_mode: DebugMode = DebugMode.NONE, accelerate:bool = True):
     clean_res_dir(problem.res_folder_path)
     problem.create_output(problem.res_folder_path)
     output_file_path = os.path.join(problem.res_folder_path, "output.txt")
-    num_total_skeleton_iterations = 0
-    num_total_skeleton_time_steps = 0
     with open(output_file_path, "a") as outfile:
 
         def write_out_msg(msg: str):
@@ -39,10 +33,8 @@ def solve_condensation(problem: Problem, material: Material, verbose: bool = Fal
         external_forces_coefficient: float = 1.0
         # ---SET SYSTEM SIZE
         _constrained_system_size, _system_size = problem.get_total_system_size()
-        _cell_system_size = problem.get_cell_system_size()
-        _total_system_size = _cell_system_size + _constrained_system_size
-        total_unknown_vector: ndarray = np.zeros((_total_system_size), dtype=real)
-        total_unknown_vector_previous_step: ndarray = np.zeros((_total_system_size), dtype=real)
+        faces_unknown_vector: ndarray = np.zeros((_constrained_system_size), dtype=real)
+        faces_unknown_vector_previous_step: ndarray = np.zeros((_constrained_system_size), dtype=real)
         # --- TIME STEP INIT
         time_step_index: int = 0
         time_step_temp: float = problem.time_steps[0]
@@ -58,22 +50,6 @@ def solve_condensation(problem: Problem, material: Material, verbose: bool = Fal
             write_out_msg("+ TIME_STEP : {} | LOAD_VALUE : {}".format(time_step_index, time_step))
             iteration: int = 0
             break_iteration: bool = False
-            # --------------------------------------------------------------------------------------------------
-            # INIT ANDERSON ACCELERATION
-            # --------------------------------------------------------------------------------------------------
-            nit = 3
-            freq = 1
-            acceleration_u = tfel.math.UAnderson(nit, freq)
-            acceleration_u.initialize(total_unknown_vector)
-            # acceleration_u_cells = []
-            if accelerate == 2:
-                for _element_index, element in enumerate(problem.elements):
-                    element.accelerator.initialize(element.cell_unknown_vector)
-                    # acceleration_u_cells.append(tfel.math.UAnderson(nit, freq))
-                    # acceleration_u_cells[_element_index].initialize(element.cell_unknown_vector)
-            # --------------------------------------------------------------------------------------------------
-            # ITERATIONS
-            # --------------------------------------------------------------------------------------------------
             while iteration < problem.number_of_iterations and not break_iteration:
                 # --------------------------------------------------------------------------------------------------
                 # SET SYSTEM MATRIX AND VECTOR
@@ -118,12 +94,11 @@ def solve_condensation(problem: Problem, material: Material, verbose: bool = Fal
                         _w_q_c = cell_quadrature_weights[_qc]
                         _x_q_c = cell_quadrature_points[:, _qc]
                         # --- COMPUTE STRAINS AND SET THEM IN THE BEHAVIOUR LAW
-                        transformation_gradient = element.get_transformation_gradient(total_unknown_vector, _qc)
+                        transformation_gradient = element.get_transformation_gradient(faces_unknown_vector, _qc)
                         material.mat_data.s1.gradients[_qp] = transformation_gradient
                         # --- INTEGRATE BEHAVIOUR LAW
                         integ_res = mgis_bv.integrate(material.mat_data, material.integration_type, _dt, _qp, (_qp + 1))
                         if integ_res != 1:
-                            # print("++++++++++++++++ @ CELL : {} | INTEG_RES FAILURE @ QUAD POINT {} WITH STRAIN {}".format(_element_index, _qp2, transformation_gradient))
                             print("++++++++++++++++ @ CELL : {} | INTEG_RES FAILURE @ QUAD POINT {}".format(_element_index, _qp))
                             print("++++++++++++++++ - POINT {}".format(_x_q_c))
                             print("++++++++++++++++ - STRAIN {}".format(transformation_gradient))
@@ -166,13 +141,14 @@ def solve_condensation(problem: Problem, material: Material, verbose: bool = Fal
                                 element_external_forces[_re0:_re1] += vl
                         # --- STAB PARAMETER CHANGE
                         stab_param = material.stabilization_parameter
+                        np.set_printoptions(edgeitems=3, infstr='inf', linewidth=1000, nanstr='nan', precision=None,suppress=True, threshold=sys.maxsize, formatter=None)
                         # --- ADDING STABILIZATION CONTRIBUTION AT THE ELEMENT LEVEL
                         element_stiffness_matrix += stab_param * element.stabilization_operator
                         # --- ADDING STABILIZATION CONTRIBUTION AT THE ELEMENT LEVEL
                         element_internal_forces += (
                                 stab_param
                                 * element.stabilization_operator
-                                @ element.get_element_unknown_vector(total_unknown_vector)
+                                @ element.get_element_unknown_vector(faces_unknown_vector)
                         )
                         # --- BOUNDARY CONDITIONS
                         for boundary_condition in problem.boundary_conditions:
@@ -188,8 +164,8 @@ def solve_condensation(problem: Problem, material: Material, verbose: bool = Fal
                                                     boundary_condition.direction + 1) * _fk
                                         _r0 = f_global * _fk * _dx + _fk * boundary_condition.direction
                                         _r1 = f_global * _fk * _dx + _fk * (boundary_condition.direction + 1)
-                                        face_lagrange = total_unknown_vector[_l0:_l1]
-                                        face_displacement = total_unknown_vector[_r0:_r1]
+                                        face_lagrange = faces_unknown_vector[_l0:_l1]
+                                        face_displacement = faces_unknown_vector[_r0:_r1]
                                         _m_psi_psi_face = np.zeros((_fk, _fk), dtype=real)
                                         _v_face_imposed_displacement = np.zeros((_fk,), dtype=real)
                                         face = element.faces[f_local]
@@ -248,9 +224,6 @@ def solve_condensation(problem: Problem, material: Material, verbose: bool = Fal
                                                     coef * v * boundary_condition.function(time_step, x_q_fp)
                                             )
                                             force_item += material.lagrange_parameter * (coef * v @ face_lagrange[:])
-                                            # _v_face_imposed_displacement += (
-                                            #         _w_q_f * v * boundary_condition.function(time_step, _x_q_f)
-                                            # )
                                         # ----- AVANT :
                                         force_item = material.lagrange_parameter * (np.ones(_fk) @ face_lagrange[:])
                                         # GET STRESS CELL PROJECTION
@@ -328,6 +301,7 @@ def solve_condensation(problem: Problem, material: Material, verbose: bool = Fal
                         m_faces_faces = element_stiffness_matrix[_c0_c:, _c0_c:]
                         v_cell = -element_residual[:_c0_c]
                         v_faces = -element_residual[_c0_c:]
+                        _condtest = np.linalg.cond(m_cell_cell)
                         m_cell_cell_inv = np.linalg.inv(m_cell_cell)
                         K_cond = m_faces_faces - ((m_faces_cell @ m_cell_cell_inv) @ m_cell_faces)
                         R_cond = v_faces - (m_faces_cell @ m_cell_cell_inv) @ v_cell
@@ -369,8 +343,6 @@ def solve_condensation(problem: Problem, material: Material, verbose: bool = Fal
                                 str(iteration).zfill(4), residual_evaluation, problem.tolerance))
                         # --- UPDATE INTERNAL VARIABLES
                         mgis_bv.update(material.mat_data)
-                        print("+ ITERATIONS : {}".format(iteration + 1))
-                        write_out_msg("+ ITERATIONS : {}".format(iteration + 1))
                         for bc in problem.boundary_conditions:
                             if bc.boundary_type == BoundaryType.DISPLACEMENT:
                                 bc.force_values.append(bc.force)
@@ -379,35 +351,34 @@ def solve_condensation(problem: Problem, material: Material, verbose: bool = Fal
                             problem.fill_quadrature_internal_variables_output(
                                 problem.res_folder_path, "INTERNAL_VARIABLES", time_step_index, time_step, material
                             )
+                        # problem.create_output(problem.res_folder_path)
                         problem.fill_quadrature_stress_output(problem.res_folder_path, "CAUCHY_STRESS",
                                                               time_step_index, time_step, material)
                         problem.fill_quadrature_strain_output(problem.res_folder_path, "STRAIN", time_step_index,
                                                               time_step, material)
                         problem.fill_quadrature_displacement_output(problem.res_folder_path, "QUADRATURE_DISPLACEMENT",
-                                                                    time_step_index, time_step, total_unknown_vector)
+                                                                    time_step_index, time_step, faces_unknown_vector)
                         problem.fill_node_displacement_output(problem.res_folder_path, "NODE_DISPLACEMENT",
-                                                              time_step_index, time_step, total_unknown_vector)
+                                                              time_step_index, time_step, faces_unknown_vector)
                         for bc in problem.boundary_conditions:
                             problem.write_force_output(problem.res_folder_path, bc)
-                        total_unknown_vector_previous_step = np.copy(total_unknown_vector)
+                        faces_unknown_vector_previous_step = np.copy(faces_unknown_vector)
                         for element in problem.elements:
                             element.cell_unknown_vector_backup = np.copy(element.cell_unknown_vector)
                         iteration = 0
                         time_step_temp = time_step + 0.
                         time_step_index += 1
-                        num_total_skeleton_time_steps += 1
                         break_iteration = True
                     elif iteration == problem.number_of_iterations - 1:
                         print("++++ ITER : {} | RES_MAX : {:.6E} | SPLITTING TIME STEP".format(
                             str(iteration).zfill(4), residual_evaluation))
                         write_out_msg("++++ ITER : {} | RES_MAX : {:.6E} | SPLITTING TIME STEP".format(
                             str(iteration).zfill(4), residual_evaluation))
-                        total_unknown_vector = np.copy(total_unknown_vector_previous_step)
+                        faces_unknown_vector = np.copy(faces_unknown_vector_previous_step)
                         for element in problem.elements:
                             element.cell_unknown_vector = np.copy(element.cell_unknown_vector_backup)
                         iteration = 0
                         problem.time_steps.insert(time_step_index, (time_step + time_step_temp) / 2.)
-                        step_time_stop = time.time()
                         break_iteration = True
                     else:
                         # --- SOLVE SYSTEM
@@ -415,12 +386,13 @@ def solve_condensation(problem: Problem, material: Material, verbose: bool = Fal
                             str(iteration).zfill(4), residual_evaluation))
                         write_out_msg("++++ ITER : {} | RES_MAX : {:.6E}".format(
                             str(iteration).zfill(4), residual_evaluation))
+                        # outfile.write("\n")
                         sparse_global_matrix = csr_matrix(tangent_matrix)
                         scaling_factor = np.max(np.abs(tangent_matrix))
                         correction = spsolve(sparse_global_matrix / scaling_factor, residual / scaling_factor)
-                        total_unknown_vector[:_constrained_system_size] += correction
+                        faces_unknown_vector += correction
                         # --- DECONDENSATION
-                        for _element_index, element in enumerate(problem.elements):
+                        for element in problem.elements:
                             _nf = len(element.faces)
                             face_correction = np.zeros((_nf * _fk * _dx), dtype=real)
                             for _i_local, _i_global in enumerate(element.faces_indices):
@@ -434,35 +406,15 @@ def solve_condensation(problem: Problem, material: Material, verbose: bool = Fal
                             )
                             # --- ADDING CORRECTION TO CURRENT DISPLACEMENT
                             element.cell_unknown_vector += cell_correction
-                            if accelerate == 1:
-                                start_index = _constrained_system_size + _element_index * problem.finite_element.cell_basis_l.dimension * problem.field.field_dimension
-                                stop_index = _constrained_system_size + (_element_index + 1) * problem.finite_element.cell_basis_l.dimension * problem.field.field_dimension
-                                total_unknown_vector[start_index:stop_index] += cell_correction
-                            if accelerate == 2:
-                                element.accelerator.accelerate(element.cell_unknown_vector)
-                                # acceleration_u_cells[_element_index].accelerate(element.cell_unknown_vector)
-                        num_total_skeleton_iterations += 1
                         iteration += 1
-                        # --------------------------------------------------------------------------------------------------
-                        # ANDERSON ACCELERATE
-                        # --------------------------------------------------------------------------------------------------
-                        if accelerate > 0:
-                            acceleration_u.accelerate(total_unknown_vector)
-                            if accelerate == 1:
-                                for _element_index, element in enumerate(problem.elements):
-                                    start_index = _constrained_system_size + _element_index * problem.finite_element.cell_basis_l.dimension * problem.field.field_dimension
-                                    stop_index = _constrained_system_size + (_element_index + 1) * problem.finite_element.cell_basis_l.dimension * problem.field.field_dimension
-                                    element.cell_unknown_vector = total_unknown_vector[start_index:stop_index]
                 else:
                     print("+ SPLITTING TIME STEP")
                     write_out_msg("+ SPLITTING TIME STEP")
                     problem.time_steps.insert(time_step_index, (time_step + time_step_temp) / 2.)
-                    total_unknown_vector = np.copy(total_unknown_vector_previous_step)
+                    faces_unknown_vector = np.copy(faces_unknown_vector_previous_step)
                     for element in problem.elements:
                         element.cell_unknown_vector = np.copy(element.cell_unknown_vector_backup)
                     iteration = 0
                 # --- END OF ITERATION
             # --- END OF TIME STEP
         # --- END OF COMPUTATION
-        write_out_msg("+ COMPUTATION NUM TIME STEPS : {:.6E}".format(num_total_skeleton_time_steps))
-        write_out_msg("+ COMPUTATION NUM ITERATIONS : {:.6E}".format(num_total_skeleton_iterations))

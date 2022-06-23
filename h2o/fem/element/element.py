@@ -1,5 +1,8 @@
 import numpy as np
 
+import tfel
+import tfel.math
+
 from h2o.h2o import *
 from h2o.geometry.shape import Shape
 from h2o.field.field import Field
@@ -57,6 +60,7 @@ class Element:
         self.stabilization_operator = stabilization_operator.get_stabilization_operator(field, finite_element, cell, faces)
         self.identity_operators = identity_operator.get_identity_operators(field, finite_element, cell, faces)
         self.operators = self.get_operators()
+        self.accelerator = tfel.math.UAnderson(3, 1)
         return
 
     def get_operators(self):
@@ -133,6 +137,29 @@ class Element:
             element_unknown_vector[_ci_l:_cj_l] += faces_global_unknown_vector[_ci_g:_cj_g]
         _ci = _cl * _dx
         element_unknown_vector[:_ci] += self.cell_unknown_vector
+        return element_unknown_vector
+
+    def get_element_unknown_vector_2(self, faces_global_unknown_vector: ndarray, cell_unknown_vec: ndarray) -> ndarray:
+        """
+
+        Args:
+            faces_global_unknown_vector:
+
+        Returns:
+
+        """
+        _dx = self.field.field_dimension
+        _fk = self.finite_element.face_basis_k.dimension
+        _cl = self.finite_element.cell_basis_l.dimension
+        element_unknown_vector = np.zeros((self.element_size,), dtype=real)
+        for _f_local, _f_global in enumerate(self.faces_indices):
+            _ci_g = _f_global * (_fk * _dx)
+            _cj_g = (_f_global + 1) * (_fk * _dx)
+            _ci_l = (_dx * _cl) + _f_local * (_fk * _dx)
+            _cj_l = (_dx * _cl) + (_f_local + 1) * (_fk * _dx)
+            element_unknown_vector[_ci_l:_cj_l] += faces_global_unknown_vector[_ci_g:_cj_g]
+        _ci = _cl * _dx
+        element_unknown_vector[:_ci] += cell_unknown_vec
         return element_unknown_vector
 
     def get_transformation_gradient(self, faces_unknown_vector: ndarray, _qc: int):

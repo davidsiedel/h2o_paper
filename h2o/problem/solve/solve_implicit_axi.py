@@ -17,7 +17,7 @@ import sys
 np.set_printoptions(edgeitems=3, infstr='inf', linewidth=1000, nanstr='nan', precision=6,suppress=True, threshold=sys.maxsize, formatter=None)
 
 
-def solve_implicit(problem: Problem, material: Material, verbose: bool = False, debug_mode: DebugMode = DebugMode.NONE, accelerate:bool = True):
+def solve_implicit(problem: Problem, material: Material, verbose: bool = False, debug_mode: DebugMode = DebugMode.NONE, accelerate:int = 1):
     clean_res_dir(problem.res_folder_path)
     problem.create_output(problem.res_folder_path)
     output_file_path = os.path.join(problem.res_folder_path, "output.txt")
@@ -111,9 +111,7 @@ def solve_implicit(problem: Problem, material: Material, verbose: bool = False, 
             # --------------------------------------------------------------------------------------------------
             # INIT ANDERSON ACCELERATION
             # --------------------------------------------------------------------------------------------------
-            nit = 10
-            freq = 1
-            acceleration_u = tfel.math.UAnderson(nit, freq)
+            acceleration_u = tfel.math.UAnderson(3, 1)
             acceleration_u.initialize(faces_unknown_vector)
             while iteration < problem.number_of_iterations and not break_iteration:
                 global_iteration_tic = time.time()
@@ -677,7 +675,7 @@ def solve_implicit(problem: Problem, material: Material, verbose: bool = False, 
                         # --------------------------------------------------------------------------------------------------
                         # ANDERSON ACCELERATE
                         # --------------------------------------------------------------------------------------------------
-                        if accelerate:
+                        if accelerate == 1:
                            acceleration_u.accelerate(faces_unknown_vector)
                         num_total_skeleton_iterations += 1
                 else:

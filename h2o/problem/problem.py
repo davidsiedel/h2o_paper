@@ -252,7 +252,7 @@ class Problem:
         return count
 
     def get_cell_system_size(self) -> int:
-        return self.mesh.number_of_cells_in_mesh * self.finite_element.cell_basis_l.dimension
+        return self.mesh.number_of_cells_in_mesh * self.finite_element.cell_basis_l.dimension * self.field.field_dimension
 
     def get_total_system_size(self) -> (int, int):
         """
