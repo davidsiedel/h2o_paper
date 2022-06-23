@@ -825,7 +825,12 @@ class Problem:
             # print(cell_vertices)
             startime = time.process_time()
             quad_p_indices = [qp_count + i for i in range(cell_quadrature_size)]
+            _constrained_system_size, _system_size = self.get_total_system_size()
+            _cell_global_index_0 = _constrained_system_size + cell_index * self.finite_element.cell_basis_l.dimension * self.field.field_dimension
+            _cell_global_index_1 = _constrained_system_size + (cell_index + 1) * self.finite_element.cell_basis_l.dimension * self.field.field_dimension
+            _cell_range = [_cell_global_index_0, _cell_global_index_1]
             element = Element(
+                _cell_range,
                 self.field,
                 self.finite_element,
                 element_cell,

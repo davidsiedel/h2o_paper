@@ -23,10 +23,9 @@ class Element:
     element_size: int
     gradients_operators: ndarray
     stabilization_operator: ndarray
-    cell_unknown_vector: ndarray
 
     def __init__(
-        self, field: Field, finite_element: FiniteElement, cell: Shape, faces: List[Shape], faces_indices: List[int], quad_p_indices: List[int]
+        self, cell_range: List[int], field: Field, finite_element: FiniteElement, cell: Shape, faces: List[Shape], faces_indices: List[int], quad_p_indices: List[int]
     ):
         """
         Args:
@@ -36,6 +35,7 @@ class Element:
             faces:
             faces_indices:
         """
+        self.cell_range = cell_range
         self.cell = cell
         self.faces = faces
         self.faces_indices = faces_indices
@@ -52,9 +52,6 @@ class Element:
         self.m_cell_cell_inv = np.zeros((_cl * _dx, _cl * _dx), dtype=real)
         self.m_cell_faces = np.zeros((_cl * _dx, _nf * _fk * _dx), dtype=real)
         self.v_cell = np.zeros((_cl * _dx,), dtype=real)
-        self.cell_unknown_vector = np.zeros((_dx * _cl,), dtype=real)
-        self.cell_unknown_vector_backup = np.zeros((_dx * _cl,), dtype=real)
-        self.local_cell_unknown_vector_backup = np.zeros((_dx * _cl,), dtype=real)
         # --- BUILD OPERATORS
         self.gradients_operators = gradient_operator.get_gradient_operators(field, finite_element, cell, faces)
         self.stabilization_operator = stabilization_operator.get_stabilization_operator(field, finite_element, cell, faces)
@@ -136,31 +133,9 @@ class Element:
             _cj_l = (_dx * _cl) + (_f_local + 1) * (_fk * _dx)
             element_unknown_vector[_ci_l:_cj_l] += faces_global_unknown_vector[_ci_g:_cj_g]
         _ci = _cl * _dx
-        element_unknown_vector[:_ci] += self.cell_unknown_vector
+        element_unknown_vector[:_ci] += faces_global_unknown_vector[self.cell_range[0]:self.cell_range[1]]
         return element_unknown_vector
 
-    def get_element_unknown_vector_2(self, faces_global_unknown_vector: ndarray, cell_unknown_vec: ndarray) -> ndarray:
-        """
-
-        Args:
-            faces_global_unknown_vector:
-
-        Returns:
-
-        """
-        _dx = self.field.field_dimension
-        _fk = self.finite_element.face_basis_k.dimension
-        _cl = self.finite_element.cell_basis_l.dimension
-        element_unknown_vector = np.zeros((self.element_size,), dtype=real)
-        for _f_local, _f_global in enumerate(self.faces_indices):
-            _ci_g = _f_global * (_fk * _dx)
-            _cj_g = (_f_global + 1) * (_fk * _dx)
-            _ci_l = (_dx * _cl) + _f_local * (_fk * _dx)
-            _cj_l = (_dx * _cl) + (_f_local + 1) * (_fk * _dx)
-            element_unknown_vector[_ci_l:_cj_l] += faces_global_unknown_vector[_ci_g:_cj_g]
-        _ci = _cl * _dx
-        element_unknown_vector[:_ci] += cell_unknown_vec
-        return element_unknown_vector
 
     def get_transformation_gradient(self, faces_unknown_vector: ndarray, _qc: int):
         """

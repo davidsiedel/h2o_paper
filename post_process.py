@@ -30,66 +30,91 @@ params = {'backend': 'pdf',
           'axes.unicode_minus': True}
 matplotlib.rcParams.update(params)
 
-# batch = "_2"
-# batch = ""
+# # batch = "_2"
+# # batch = ""
+
+# computation_parameters = [
+#     # --- ORDER 1
+#     # CONSISTENT JACOBIAN
+#     {"mesh" : "coarse", "order": 1, "algorithm" : "explicit", "integration" : mgis_bv.IntegrationType.IntegrationWithConsistentTangentOperator, "acceleration": 0},
+#     {"mesh" : "coarse", "order": 1, "algorithm" : "implicit", "integration" : mgis_bv.IntegrationType.IntegrationWithConsistentTangentOperator, "acceleration": 0},
+#     # ELASTIC JACOBIAN
+#     {"mesh" : "coarse", "order": 1, "algorithm" : "explicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 0},
+#     {"mesh" : "coarse", "order": 1, "algorithm" : "explicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 1},
+#     {"mesh" : "coarse", "order": 1, "algorithm" : "explicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 2},
+#     {"mesh" : "coarse", "order": 1, "algorithm" : "implicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 0},
+#     {"mesh" : "coarse", "order": 1, "algorithm" : "implicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 1},
+#     # --- ORDER 2
+#     # CONSISTENT JACOBIAN
+#     {"mesh" : "coarse", "order": 2, "algorithm" : "explicit", "integration" : mgis_bv.IntegrationType.IntegrationWithConsistentTangentOperator, "acceleration": 0},
+#     {"mesh" : "coarse", "order": 2, "algorithm" : "implicit", "integration" : mgis_bv.IntegrationType.IntegrationWithConsistentTangentOperator, "acceleration": 0},
+#     # ELASTIC JACOBIAN
+#     {"mesh" : "coarse", "order": 2, "algorithm" : "explicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 0},
+#     {"mesh" : "coarse", "order": 2, "algorithm" : "explicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 1},
+#     {"mesh" : "coarse", "order": 2, "algorithm" : "explicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 2},
+#     {"mesh" : "coarse", "order": 2, "algorithm" : "implicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 0},
+#     {"mesh" : "coarse", "order": 2, "algorithm" : "implicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 1},
+#     # --- ORDER 3
+#     # CONSISTENT JACOBIAN
+#     {"mesh" : "coarse", "order": 3, "algorithm" : "explicit", "integration" : mgis_bv.IntegrationType.IntegrationWithConsistentTangentOperator, "acceleration": 0},
+#     {"mesh" : "coarse", "order": 3, "algorithm" : "implicit", "integration" : mgis_bv.IntegrationType.IntegrationWithConsistentTangentOperator, "acceleration": 0},
+#     # ELASTIC JACOBIAN
+#     {"mesh" : "coarse", "order": 3, "algorithm" : "explicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 0},
+#     {"mesh" : "coarse", "order": 3, "algorithm" : "explicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 1},
+#     {"mesh" : "coarse", "order": 3, "algorithm" : "explicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 2},
+#     {"mesh" : "coarse", "order": 3, "algorithm" : "implicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 0},
+#     {"mesh" : "coarse", "order": 3, "algorithm" : "implicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 1},
+# ]
 
 computation_parameters = [
     # --- ORDER 1
     # CONSISTENT JACOBIAN
-    {"mesh" : "coarse", "order": 1, "algorithm" : "explicit", "integration" : mgis_bv.IntegrationType.IntegrationWithConsistentTangentOperator, "acceleration": 0},
-    {"mesh" : "coarse", "order": 1, "algorithm" : "implicit", "integration" : mgis_bv.IntegrationType.IntegrationWithConsistentTangentOperator, "acceleration": 0},
+    {"mesh" : "coarse", "order": 1, "algorithm" : "Explicit", "jacobian" : "Consistent", "acceleration": "NonAccelerated"},
+    {"mesh" : "coarse", "order": 1, "algorithm" : "Implicit", "jacobian" : "Consistent", "acceleration": "NonAccelerated"},
     # ELASTIC JACOBIAN
-    {"mesh" : "coarse", "order": 1, "algorithm" : "explicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 0},
-    {"mesh" : "coarse", "order": 1, "algorithm" : "explicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 1},
-    {"mesh" : "coarse", "order": 1, "algorithm" : "explicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 2},
-    {"mesh" : "coarse", "order": 1, "algorithm" : "implicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 0},
-    {"mesh" : "coarse", "order": 1, "algorithm" : "implicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 1},
+    {"mesh" : "coarse", "order": 1, "algorithm" : "Explicit", "jacobian" : "Elastic", "acceleration": "NonAccelerated"},
+    {"mesh" : "coarse", "order": 1, "algorithm" : "Explicit", "jacobian" : "Elastic", "acceleration": "Accelerated"},
+    {"mesh" : "coarse", "order": 1, "algorithm" : "Implicit", "jacobian" : "Elastic", "acceleration": "NonAccelerated"},
+    {"mesh" : "coarse", "order": 1, "algorithm" : "Implicit", "jacobian" : "Elastic", "acceleration": "Accelerated"},
     # --- ORDER 2
     # CONSISTENT JACOBIAN
-    {"mesh" : "coarse", "order": 2, "algorithm" : "explicit", "integration" : mgis_bv.IntegrationType.IntegrationWithConsistentTangentOperator, "acceleration": 0},
-    {"mesh" : "coarse", "order": 2, "algorithm" : "implicit", "integration" : mgis_bv.IntegrationType.IntegrationWithConsistentTangentOperator, "acceleration": 0},
+    {"mesh" : "coarse", "order": 2, "algorithm" : "Explicit", "jacobian" : "Consistent", "acceleration": "NonAccelerated"},
+    {"mesh" : "coarse", "order": 2, "algorithm" : "Implicit", "jacobian" : "Consistent", "acceleration": "NonAccelerated"},
     # ELASTIC JACOBIAN
-    {"mesh" : "coarse", "order": 2, "algorithm" : "explicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 0},
-    {"mesh" : "coarse", "order": 2, "algorithm" : "explicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 1},
-    {"mesh" : "coarse", "order": 2, "algorithm" : "explicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 2},
-    {"mesh" : "coarse", "order": 2, "algorithm" : "implicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 0},
-    {"mesh" : "coarse", "order": 2, "algorithm" : "implicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 1},
+    {"mesh" : "coarse", "order": 2, "algorithm" : "Explicit", "jacobian" : "Elastic", "acceleration": "NonAccelerated"},
+    {"mesh" : "coarse", "order": 2, "algorithm" : "Explicit", "jacobian" : "Elastic", "acceleration": "Accelerated"},
+    {"mesh" : "coarse", "order": 2, "algorithm" : "Implicit", "jacobian" : "Elastic", "acceleration": "NonAccelerated"},
+    {"mesh" : "coarse", "order": 2, "algorithm" : "Implicit", "jacobian" : "Elastic", "acceleration": "Accelerated"},
     # --- ORDER 3
     # CONSISTENT JACOBIAN
-    {"mesh" : "coarse", "order": 3, "algorithm" : "explicit", "integration" : mgis_bv.IntegrationType.IntegrationWithConsistentTangentOperator, "acceleration": 0},
-    {"mesh" : "coarse", "order": 3, "algorithm" : "implicit", "integration" : mgis_bv.IntegrationType.IntegrationWithConsistentTangentOperator, "acceleration": 0},
+    {"mesh" : "coarse", "order": 3, "algorithm" : "Explicit", "jacobian" : "Consistent", "acceleration": "NonAccelerated"},
+    {"mesh" : "coarse", "order": 3, "algorithm" : "Implicit", "jacobian" : "Consistent", "acceleration": "NonAccelerated"},
     # ELASTIC JACOBIAN
-    {"mesh" : "coarse", "order": 3, "algorithm" : "explicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 0},
-    {"mesh" : "coarse", "order": 3, "algorithm" : "explicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 1},
-    {"mesh" : "coarse", "order": 3, "algorithm" : "explicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 2},
-    {"mesh" : "coarse", "order": 3, "algorithm" : "implicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 0},
-    {"mesh" : "coarse", "order": 3, "algorithm" : "implicit", "integration" : mgis_bv.IntegrationType.IntegrationWithElasticOperator, "acceleration": 1},
+    {"mesh" : "coarse", "order": 3, "algorithm" : "Explicit", "jacobian" : "Elastic", "acceleration": "NonAccelerated"},
+    {"mesh" : "coarse", "order": 3, "algorithm" : "Explicit", "jacobian" : "Elastic", "acceleration": "Accelerated"},
+    {"mesh" : "coarse", "order": 3, "algorithm" : "Implicit", "jacobian" : "Elastic", "acceleration": "NonAccelerated"},
+    {"mesh" : "coarse", "order": 3, "algorithm" : "Implicit", "jacobian" : "Elastic", "acceleration": "Accelerated"},
+    # LOCAL ACCELERATION
 ]
 
 algo_dict = {
-    "explicit" : {"label": "Static Condensation", "linestyle": "--", "color": 'b'},
-    "implicit" : {"label": "Cell Equilibrium", "linestyle": ":", "color": 'r'},
+    "Explicit" : {"label": "Static Condensation", "linestyle": "--", "color": 'b'},
+    "Implicit" : {"label": "Cell Equilibrium", "linestyle": ":", "color": 'r'},
 }
 
 integration_dict = {
-    mgis_bv.IntegrationType.IntegrationWithElasticOperator : {"label": "elastic jacobian", "linestyle": '--', "marker": 'p'},
-    mgis_bv.IntegrationType.IntegrationWithConsistentTangentOperator : {"label": "consistent jacobian", "linestyle": '-', "marker": ''}
+    "Consistent" : {"label": "consistent jacobian", "linestyle": '--', "marker": 'p'},
+    "Elastic" : {"label": "elastic jacobian", "linestyle": '-', "marker": ''}
 }
 
 acceleration_dict = {
-    0 : {"label": " no acceleration", "linestyle" : ':'},
-    1 : {"label": "global acceleration", "linestyle" : '--'},
-    2 : {"label": "separate acceleration", "linestyle" : '-.'}
+    "NonAccelerated" : {"label": "non-accelerated", "linestyle" : ':'},
+    "Accelerated" : {"label": "accelerated", "linestyle" : '--'},
 }
-
-# linestyle_dict = {
-#     "explicit" : '--',
-#     "implicit" : '-.',
-# }
 
 def fetch_data(batch, specimen, index, norm_index):
     c_norm = computation_parameters[norm_index]
-    file_path = "/home/dsiedel/Documents/2022_01_06_PAPER_01/h2o/res{}_{}__{}__hho{}__{}__{}__acceleration_{}/output.txt".format(batch, specimen, c_norm["mesh"], c_norm["order"], c_norm["algorithm"], c_norm["integration"], c_norm["acceleration"])
+    file_path = "/home/dsiedel/Documents/2022_01_06_PAPER_01/h2o/res{}_{}__{}__hho{}__{}__{}__{}/output.txt".format(batch, specimen, c_norm["mesh"], c_norm["order"], c_norm["algorithm"], c_norm["jacobian"], c_norm["acceleration"])
     with open(file_path, 'r') as file_n:
         iterations = []
         lines = file_n.readlines()
@@ -105,7 +130,7 @@ def fetch_data(batch, specimen, index, norm_index):
         time_steps = np.linspace(0, 1, len(iterations), endpoint=True)
     norm_fun = interpolate.interp1d(time_steps, iterations)
     c = computation_parameters[index]
-    file_path = "/home/dsiedel/Documents/2022_01_06_PAPER_01/h2o/res{}_{}__{}__hho{}__{}__{}__acceleration_{}/output.txt".format(batch, specimen, c["mesh"], c["order"], c["algorithm"], c["integration"], c["acceleration"])
+    file_path = "/home/dsiedel/Documents/2022_01_06_PAPER_01/h2o/res{}_{}__{}__hho{}__{}__{}__{}/output.txt".format(batch, specimen, c["mesh"], c["order"], c["algorithm"], c["jacobian"], c["acceleration"])
     with open(file_path, 'r') as file:
         iterations = []
         lines = file.readlines()
@@ -131,7 +156,7 @@ def plot(batch, specimen, indices, norm_indices, suffix = ""):
             x, y = fetch_data(batch, specimen, i, norm_indices[cnt])
             c = computation_parameters[i]
             # lab = "{}, HHO({},{}), {}, {}".format(algo_dict[c["algorithm"]], c["order"], c["order"], integration_dict[c["integration"]], acceleration_dict[c["acceleration"]])
-            lab = "{}, {}, {}".format(algo_dict[c["algorithm"]]["label"], integration_dict[c["integration"]]["label"], acceleration_dict[c["acceleration"]]["label"])
+            lab = "{}, {}, {}".format(algo_dict[c["algorithm"]]["label"], integration_dict[c["jacobian"]]["label"], acceleration_dict[c["acceleration"]]["label"])
             # for kk in range(len(time_steps)):
             #     print(iterations[kk]/norm_fun(time_steps[kk]))
             ptr = ax[cnt]
@@ -185,18 +210,28 @@ def plot(batch, specimen, indices, norm_indices, suffix = ""):
 #     # 0,
 #     1, 2, 4, 5, 12
 # ], "_ord1")
-plot("_3", "swelling_sphere", [
+plot("_4", "swelling_sphere", [
     # [1, 2, 3, 4, 5, 6], [8, 9 ,10 ,11, 12, 13], [15, 16 ,17 ,18, 19, 20]
     # [1, 2, 4, 5, 6], [8, 9 ,11, 12, 13], [15, 16 ,18, 19, 20]
-    [1, 2, 5, 6], [8, 9, 12, 13], [15, 16, 19, 20]
+    # [1, 2, 5, 6], [8, 9, 12, 13], [15, 16, 19, 20]
+    [1, 2, 3, 4, 5], [7, 8, 9, 10, 11], [1, 2, 3, 4, 5]
     # [8, 9, 10, 11, 12]
-], [0, 7, 14], "_ordn")
-plot("_3", "notched_rod", [
-    # [1, 2, 3, 4, 5, 6], [8, 9 ,10 ,11, 12, 13], [15, 16 ,17 ,18, 19, 20]
-    # [1, 2, 4, 5, 6], [1, 2, 4, 5, 6], [1, 2, 4, 5, 6]
-    [1, 2, 5, 6], [1, 2, 5, 6], [1, 2, 5, 6]
-    # [8, 9, 10, 11, 12]
-], [0, 0, 0], "_ordn")
+],
+# [0, 7, 14],
+[0, 6, 0],
+"_ordn"
+)
+
+
+# plot("_3", "notched_rod", [
+#     # [1, 2, 3, 4, 5, 6], [8, 9 ,10 ,11, 12, 13], [15, 16 ,17 ,18, 19, 20]
+#     # [1, 2, 4, 5, 6], [1, 2, 4, 5, 6], [1, 2, 4, 5, 6]
+#     [1, 2, 5, 6], [1, 2, 5, 6], [1, 2, 5, 6]
+#     # [8, 9, 10, 11, 12]
+# ],
+# [0, 0, 0],
+# "_ordn"
+# )
 
 
 # fig, ax = plt.subplots(2, 2)

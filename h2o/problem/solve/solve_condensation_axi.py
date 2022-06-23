@@ -20,7 +20,14 @@ np.set_printoptions(edgeitems=3, infstr='inf', linewidth=1000, nanstr='nan', pre
 from h2o.problem.output import create_output_txt
 
 
-def solve_condensation(problem: Problem, material: Material, verbose: bool = False, debug_mode: DebugMode = DebugMode.NONE, accelerate:int = 0):
+def solve_condensation(
+    problem: Problem,
+    material: Material,
+    verbose: bool = False,
+    debug_mode: DebugMode = DebugMode.NONE,
+    accelerate:int = 0,
+    num_local_iterations: int = 200
+):
     clean_res_dir(problem.res_folder_path)
     problem.create_output(problem.res_folder_path)
     output_file_path = os.path.join(problem.res_folder_path, "output.txt")
@@ -47,8 +54,6 @@ def solve_condensation(problem: Problem, material: Material, verbose: bool = Fal
         time_step_index: int = 0
         time_step_temp: float = problem.time_steps[0]
         while time_step_index < len(problem.time_steps):
-            global_time_step_tic = time.time()
-            step_time_start = time.time()
             time_step: float = problem.time_steps[time_step_index]
             material.set_temperature()
             # --- PRINT DATA
@@ -61,16 +66,11 @@ def solve_condensation(problem: Problem, material: Material, verbose: bool = Fal
             # --------------------------------------------------------------------------------------------------
             # INIT ANDERSON ACCELERATION
             # --------------------------------------------------------------------------------------------------
-            nit = 3
-            freq = 1
-            acceleration_u = tfel.math.UAnderson(nit, freq)
-            acceleration_u.initialize(total_unknown_vector)
-            # acceleration_u_cells = []
-            if accelerate == 2:
-                for _element_index, element in enumerate(problem.elements):
-                    element.accelerator.initialize(element.cell_unknown_vector)
-                    # acceleration_u_cells.append(tfel.math.UAnderson(nit, freq))
-                    # acceleration_u_cells[_element_index].initialize(element.cell_unknown_vector)
+            acceleration_u = tfel.math.UAnderson(3, 1)
+            if accelerate > 0 and num_local_iterations > 0:
+                acceleration_u.initialize(total_unknown_vector[:_constrained_system_size])
+            elif accelerate > 0 and num_local_iterations == 0:
+                acceleration_u.initialize(total_unknown_vector)
             # --------------------------------------------------------------------------------------------------
             # ITERATIONS
             # --------------------------------------------------------------------------------------------------
@@ -91,60 +91,20 @@ def solve_condensation(problem: Problem, material: Material, verbose: bool = Fal
                 # FOR ELEMENT LOOP
                 # --------------------------------------------------------------------------------------------------
                 iter_face_constraint: int = 0
+                num_cells_iterations = 0
                 for boundary_condition in problem.boundary_conditions:
                     if boundary_condition.boundary_type == BoundaryType.DISPLACEMENT:
                         boundary_condition.force = 0.0
                 for _element_index, element in enumerate(problem.elements):
-                    _io: int = problem.finite_element.computation_integration_order
-                    cell_quadrature_size = element.cell.get_quadrature_size(
-                        _io, quadrature_type=problem.quadrature_type
-                    )
-                    cell_quadrature_points = element.cell.get_quadrature_points(
-                        _io, quadrature_type=problem.quadrature_type
-                    )
-                    cell_quadrature_weights = element.cell.get_quadrature_weights(
-                        _io, quadrature_type=problem.quadrature_type
-                    )
-                    x_c: ndarray = element.cell.get_centroid()
-                    bdc: ndarray = element.cell.get_bounding_box()
+
                     _nf: int = len(element.faces)
                     _c0_c: int = _dx * _cl
-                    # --- INITIALIZE MATRIX AND VECTORS
-                    element_stiffness_matrix = np.zeros((element.element_size, element.element_size), dtype=real)
-                    element_internal_forces = np.zeros((element.element_size,), dtype=real)
-                    element_external_forces = np.zeros((element.element_size,), dtype=real)
-                    for _qc in range(cell_quadrature_size):
-                        _qp = element.quad_p_indices[_qc]
-                        _w_q_c = cell_quadrature_weights[_qc]
-                        _x_q_c = cell_quadrature_points[:, _qc]
-                        # --- COMPUTE STRAINS AND SET THEM IN THE BEHAVIOUR LAW
-                        transformation_gradient = element.get_transformation_gradient(total_unknown_vector, _qc)
-                        material.mat_data.s1.gradients[_qp] = transformation_gradient
-                        # --- INTEGRATE BEHAVIOUR LAW
-                        integ_res = mgis_bv.integrate(material.mat_data, material.integration_type, _dt, _qp, (_qp + 1))
-                        if integ_res != 1:
-                            # print("++++++++++++++++ @ CELL : {} | INTEG_RES FAILURE @ QUAD POINT {} WITH STRAIN {}".format(_element_index, _qp2, transformation_gradient))
-                            print("++++++++++++++++ @ CELL : {} | INTEG_RES FAILURE @ QUAD POINT {}".format(_element_index, _qp))
-                            print("++++++++++++++++ - POINT {}".format(_x_q_c))
-                            print("++++++++++++++++ - STRAIN {}".format(transformation_gradient))
-                            write_out_msg("++++++++++++++++ @ CELL : {} | INTEG_RES FAILURE @ QUAD POINT {}".format(_element_index, _qp))
-                            write_out_msg("++++++++++++++++ - POINT {}".format(_x_q_c))
-                            write_out_msg("++++++++++++++++ - STRAIN {}".format(transformation_gradient))
-                            break_iteration = True
-                            break
-                        else:
-                            # --- COMPUTE STIFFNESS MATRIX CONTRIBUTION AT QUADRATURE POINT
-                            element_stiffness_matrix += 2.0 * np.pi *_w_q_c * _x_q_c[0] * (
-                                    element.gradients_operators[_qc].T @ material.mat_data.K[_qp] @
-                                    element.gradients_operators[_qc]
-                            )
-                            # --- COMPUTE STIFFNESS MATRIX CONTRIBUTION AT QUADRATURE POINT
-                            element_internal_forces += 2.0 * np.pi *_w_q_c * _x_q_c[0] * (
-                                    element.gradients_operators[_qc].T @ material.mat_data.s1.thermodynamic_forces[_qp]
-                            )
-                    if not break_iteration:
-                        # --- VOLUMETRIC LOAD
-                        _io: int = problem.finite_element.l_order
+                    bdc: ndarray = element.cell.get_bounding_box()
+                    
+                    def make_cell_procedure(break_iter: bool):
+                        # --------------------------------------------------------------------------------------------------
+                        # INTEGRATION
+                        # --------------------------------------------------------------------------------------------------
                         _io: int = problem.finite_element.computation_integration_order
                         cell_quadrature_size = element.cell.get_quadrature_size(
                             _io, quadrature_type=problem.quadrature_type
@@ -155,25 +115,83 @@ def solve_condensation(problem: Problem, material: Material, verbose: bool = Fal
                         cell_quadrature_weights = element.cell.get_quadrature_weights(
                             _io, quadrature_type=problem.quadrature_type
                         )
+                        x_c: ndarray = element.cell.get_centroid()
+                        bdc: ndarray = element.cell.get_bounding_box()
+                        element_stiffness_matrix = np.zeros((element.element_size, element.element_size), dtype=real)
+                        element_internal_forces = np.zeros((element.element_size,), dtype=real)
+                        element_external_forces = np.zeros((element.element_size,), dtype=real)
                         for _qc in range(cell_quadrature_size):
+                            _qp = element.quad_p_indices[_qc]
                             _w_q_c = cell_quadrature_weights[_qc]
                             _x_q_c = cell_quadrature_points[:, _qc]
-                            v = problem.finite_element.cell_basis_l.evaluate_function(_x_q_c, x_c, bdc)
-                            for load in problem.loads:
-                                vl = 2.0 * np.pi * _w_q_c * _x_q_c[0] * v * load.function(time_step, _x_q_c)
-                                _re0 = load.direction * _cl
-                                _re1 = (load.direction + 1) * _cl
-                                element_external_forces[_re0:_re1] += vl
-                        # --- STAB PARAMETER CHANGE
-                        stab_param = material.stabilization_parameter
-                        # --- ADDING STABILIZATION CONTRIBUTION AT THE ELEMENT LEVEL
-                        element_stiffness_matrix += stab_param * element.stabilization_operator
-                        # --- ADDING STABILIZATION CONTRIBUTION AT THE ELEMENT LEVEL
-                        element_internal_forces += (
-                                stab_param
-                                * element.stabilization_operator
-                                @ element.get_element_unknown_vector(total_unknown_vector)
-                        )
+                            # --- COMPUTE STRAINS AND SET THEM IN THE BEHAVIOUR LAW
+                            transformation_gradient = element.get_transformation_gradient(total_unknown_vector, _qc)
+                            material.mat_data.s1.gradients[_qp] = transformation_gradient
+                            # --- INTEGRATE BEHAVIOUR LAW
+                            integ_res = mgis_bv.integrate(material.mat_data, material.integration_type, _dt, _qp, (_qp + 1))
+                            if integ_res != 1:
+                                print("++++++++++++++++ @ CELL : {} | INTEG_RES FAILURE @ QUAD POINT {}".format(_element_index, _qp))
+                                print("++++++++++++++++ - POINT {}".format(_x_q_c))
+                                print("++++++++++++++++ - STRAIN {}".format(transformation_gradient))
+                                write_out_msg("++++++++++++++++ @ CELL : {} | INTEG_RES FAILURE @ QUAD POINT {}".format(_element_index, _qp))
+                                write_out_msg("++++++++++++++++ - POINT {}".format(_x_q_c))
+                                write_out_msg("++++++++++++++++ - STRAIN {}".format(transformation_gradient))
+                                break_iter = True
+                                break
+                            else:
+                                # --- COMPUTE STIFFNESS MATRIX CONTRIBUTION AT QUADRATURE POINT
+                                w_coef = _w_q_c
+                                if problem.field.field_type in [FieldType.DISPLACEMENT_LARGE_STRAIN_AXISYMMETRIC, FieldType.DISPLACEMENT_SMALL_STRAIN_AXISYMMETRIC]:
+                                    w_coef *= 2.0 * np.pi * _x_q_c[0]
+                                element_stiffness_matrix += w_coef * (
+                                        element.gradients_operators[_qc].T @ material.mat_data.K[_qp] @
+                                        element.gradients_operators[_qc]
+                                )
+                                # --- COMPUTE STIFFNESS MATRIX CONTRIBUTION AT QUADRATURE POINT
+                                element_internal_forces += w_coef * (
+                                        element.gradients_operators[_qc].T @ material.mat_data.s1.thermodynamic_forces[_qp]
+                                )
+                                # --- COMPUTE EXTERNAL FORCES
+                                v = problem.finite_element.cell_basis_l.evaluate_function(_x_q_c, x_c, bdc)
+                                for load in problem.loads:
+                                    vl = w_coef * v * load.function(time_step, _x_q_c)
+                                    _re0 = load.direction * _cl
+                                    _re1 = (load.direction + 1) * _cl
+                                    element_external_forces[_re0:_re1] += vl
+                        # GET ELEMENT CONTRIBS
+                        if not break_iter:
+                            # --- STAB PARAMETER CHANGE
+                            stab_param = material.stabilization_parameter
+                            # --- ADDING STABILIZATION CONTRIBUTION AT THE ELEMENT LEVEL
+                            element_stiffness_matrix += stab_param * element.stabilization_operator
+                            # --- ADDING STABILIZATION CONTRIBUTION AT THE ELEMENT LEVEL
+                            element_internal_forces += (
+                                    stab_param
+                                    * element.stabilization_operator
+                                    @ element.get_element_unknown_vector(total_unknown_vector)
+                            )
+                        return element_stiffness_matrix, element_internal_forces, element_external_forces, break_iter
+
+                    element_stiffness_matrix, element_internal_forces, element_external_forces, break_iteration = make_cell_procedure(break_iteration)
+                    local_external_forces_coefficient = 1.
+                    local_tolerance = 1.e-6
+                    local_iteration = 0
+                    while local_iteration < num_local_iterations and not break_iteration:
+                        R_cc = (element_internal_forces - element_external_forces)[:_c0_c]
+                        # if local_external_forces_coefficient == 0.0:
+                        #     local_external_forces_coefficient = 1.0
+                        # local_external_forces_coefficient = 1.0 / np.prod(bdc)
+                        local_residual_evaluation = np.max(np.abs(R_cc)) * np.prod(bdc)
+                        if local_residual_evaluation < local_tolerance:
+                            break
+                        else:
+                            element_stiffness_matrix, element_internal_forces, element_external_forces, break_iteration = make_cell_procedure(break_iteration)
+                            K_cc = element_stiffness_matrix[:_c0_c, :_c0_c]
+                            R_cc = (element_internal_forces - element_external_forces)[:_c0_c]
+                            cell_correction = np.linalg.solve(-K_cc, R_cc)
+                            total_unknown_vector[element.cell_range[0]:element.cell_range[1]] += cell_correction
+                            num_cells_iterations += 1
+                    if not break_iteration:
                         # --- BOUNDARY CONDITIONS
                         for boundary_condition in problem.boundary_conditions:
                             # --- DISPLACEMENT CONDITIONS
@@ -184,8 +202,7 @@ def solve_condensation(problem: Problem, material: Material, verbose: bool = Fal
                                         _l0 = _system_size + iter_face_constraint * _fk
                                         _l1 = _system_size + (iter_face_constraint + 1) * _fk
                                         _c0 = _cl * _dx + (f_local * _dx * _fk) + boundary_condition.direction * _fk
-                                        _c1 = _cl * _dx + (f_local * _dx * _fk) + (
-                                                    boundary_condition.direction + 1) * _fk
+                                        _c1 = _cl * _dx + (f_local * _dx * _fk) + (boundary_condition.direction + 1) * _fk
                                         _r0 = f_global * _fk * _dx + _fk * boundary_condition.direction
                                         _r1 = f_global * _fk * _dx + _fk * (boundary_condition.direction + 1)
                                         face_lagrange = total_unknown_vector[_l0:_l1]
@@ -214,15 +231,21 @@ def solve_condensation(problem: Problem, material: Material, verbose: bool = Fal
                                         )
                                         for _qf in range(face_quadrature_size):
                                             x_q_fp = np.copy(face_quadrature_points[:, _qf])
-                                            if x_q_fp[0] < 1.e-10:
-                                                x_q_fp[0] = 1.e-10
                                             w_q_f = face_quadrature_weights[_qf]
+                                            w_coef = w_q_f
+                                            if problem.field.field_type in [
+                                                FieldType.DISPLACEMENT_LARGE_STRAIN_AXISYMMETRIC,
+                                                FieldType.DISPLACEMENT_SMALL_STRAIN_AXISYMMETRIC
+                                            ]:
+                                                if x_q_fp[0] < 1.e-10:
+                                                    x_q_fp[0] = 1.e-10
+                                                w_coef *= 2.0 * np.pi * x_q_fp[0]
                                             s_f = (face_rot @ x_f)[:-1]
                                             s_q_f = (face_rot @ x_q_fp)[:-1]
-                                            coef = 2.0 * np.pi * x_q_fp[0] * w_q_f
+                                            # coef = 2.0 * np.pi * x_q_fp[0] * w_q_f
                                             _psi_k = problem.finite_element.face_basis_k.evaluate_function(s_q_f, s_f,
                                                                                                            bdf_proj)
-                                            _m_psi_psi_face += coef * np.tensordot(_psi_k, _psi_k, axes=0)
+                                            _m_psi_psi_face += w_coef * np.tensordot(_psi_k, _psi_k, axes=0)
                                         _io: int = 8
                                         _io: int = problem.finite_element.computation_integration_order
                                         face_quadrature_size = face.get_quadrature_size(
@@ -236,29 +259,29 @@ def solve_condensation(problem: Problem, material: Material, verbose: bool = Fal
                                         )
                                         for _qf in range(face_quadrature_size):
                                             x_q_fp = np.copy(face_quadrature_points[:, _qf])
-                                            if x_q_fp[0] < 1.e-10:
-                                                x_q_fp[0] = 1.e-10
                                             w_q_f = face_quadrature_weights[_qf]
+                                            w_coef = w_q_f
+                                            if problem.field.field_type in [
+                                                FieldType.DISPLACEMENT_LARGE_STRAIN_AXISYMMETRIC,
+                                                FieldType.DISPLACEMENT_SMALL_STRAIN_AXISYMMETRIC
+                                            ]:
+                                                if x_q_fp[0] < 1.e-10:
+                                                    x_q_fp[0] = 1.e-10
+                                                w_coef *= 2.0 * np.pi * x_q_fp[0]
                                             s_f = (face_rot @ x_f)[:-1]
                                             s_q_f = (face_rot @ x_q_fp)[:-1]
-                                            coef = 2.0 * np.pi * x_q_fp[0] * w_q_f
+                                            # coef = 2.0 * np.pi * x_q_fp[0] * w_q_f
                                             v = problem.finite_element.face_basis_k.evaluate_function(s_q_f, s_f,
                                                                                                       bdf_proj)
                                             _v_face_imposed_displacement += (
-                                                    coef * v * boundary_condition.function(time_step, x_q_fp)
+                                                    w_coef * v * boundary_condition.function(time_step, x_q_fp)
                                             )
-                                            force_item += material.lagrange_parameter * (coef * v @ face_lagrange[:])
+                                            force_item += material.lagrange_parameter * (w_coef * v @ face_lagrange[:])
                                             # _v_face_imposed_displacement += (
                                             #         _w_q_f * v * boundary_condition.function(time_step, _x_q_f)
                                             # )
                                         # ----- AVANT :
                                         force_item = material.lagrange_parameter * (np.ones(_fk) @ face_lagrange[:])
-                                        # GET STRESS CELL PROJECTION
-                                        for _qc in range(cell_quadrature_size):
-                                            _qp = element.quad_p_indices[_qc]
-                                            _w_q_c = cell_quadrature_weights[_qc]
-                                            _x_q_c = cell_quadrature_points[:, _qc]
-
                                         boundary_condition.force += force_item
                                         _m_psi_psi_face_inv = np.linalg.inv(_m_psi_psi_face)
                                         imposed_face_displacement = _m_psi_psi_face_inv @ _v_face_imposed_displacement
@@ -303,15 +326,20 @@ def solve_condensation(problem: Problem, material: Material, verbose: bool = Fal
                                         )
                                         for _qf in range(face_quadrature_size):
                                             x_q_fp = np.copy(face_quadrature_points[:, _qf])
-                                            if x_q_fp[0] < 1.e-10:
-                                                x_q_fp[0] = 1.e-10
                                             w_q_f = face_quadrature_weights[_qf]
+                                            w_coef = w_q_f
+                                            if problem.field.field_type in [
+                                                FieldType.DISPLACEMENT_LARGE_STRAIN_AXISYMMETRIC,
+                                                FieldType.DISPLACEMENT_SMALL_STRAIN_AXISYMMETRIC
+                                            ]:
+                                                if x_q_fp[0] < 1.e-10:
+                                                    x_q_fp[0] = 1.e-10
+                                                w_coef *= 2.0 * np.pi * x_q_fp[0]
                                             s_f = (face_rot @ x_f)[:-1]
                                             s_q_f = (face_rot @ x_q_fp)[:-1]
-                                            coef = 2.0 * np.pi * x_q_fp[0] * w_q_f
                                             v = problem.finite_element.face_basis_k.evaluate_function(s_q_f, s_f,
                                                                                                       bdf_proj)
-                                            vf = coef * v * boundary_condition.function(time_step, x_q_fp)
+                                            vf = w_coef * v * boundary_condition.function(time_step, x_q_fp)
                                             # vf = _w_q_f * v * boundary_condition.function(time_step, _x_q_f)
                                             _c0 = _dx * _cl + f_local * _dx * _fk + boundary_condition.direction * _fk
                                             _c1 = _dx * _cl + f_local * _dx * _fk + (
@@ -353,6 +381,7 @@ def solve_condensation(problem: Problem, material: Material, verbose: bool = Fal
                             external_forces_coefficient = np.max(np.abs(element_external_forces))
                     else:
                         break
+                mean_num_cells_iterations = float(num_cells_iterations) / float(problem.mesh.number_of_cells_in_mesh)
                 if not break_iteration:
                     # --------------------------------------------------------------------------------------------------
                     # RESIDUAL EVALUATION
@@ -361,12 +390,20 @@ def solve_condensation(problem: Problem, material: Material, verbose: bool = Fal
                         external_forces_coefficient = 1.0
                     residual_evaluation = np.max(np.abs(residual)) / external_forces_coefficient
                     if residual_evaluation < problem.tolerance:
-                        print(
-                            "++++ ITER : {} | RES_MAX : {:.6E} | TOLERANCE {:.6E} | CONVERGENCE".format(
-                                str(iteration).zfill(4), residual_evaluation, problem.tolerance))
-                        write_out_msg(
-                            "++++ ITER : {} | RES_MAX : {:.6E} | TOLERANCE {:.6E} | CONVERGENCE".format(
-                                str(iteration).zfill(4), residual_evaluation, problem.tolerance))
+                        if num_local_iterations > 0:
+                            print(
+                                "++++ ITER : {} | MEAN_CELLS_ITERATIONS : {:.6E} | RES_MAX : {:.6E} | TOLERANCE {:.6E} | CONVERGENCE".format(
+                                    str(iteration).zfill(4), mean_num_cells_iterations, residual_evaluation, problem.tolerance))
+                            write_out_msg(
+                                "++++ ITER : {} | MEAN_CELLS_ITERATIONS : {:.6E} | RES_MAX : {:.6E} | TOLERANCE {:.6E} | CONVERGENCE".format(
+                                    str(iteration).zfill(4), mean_num_cells_iterations, residual_evaluation, problem.tolerance))
+                        else:
+                            print(
+                                "++++ ITER : {} | RES_MAX : {:.6E} | TOLERANCE {:.6E} | CONVERGENCE".format(
+                                    str(iteration).zfill(4), residual_evaluation, problem.tolerance))
+                            write_out_msg(
+                                "++++ ITER : {} | RES_MAX : {:.6E} | TOLERANCE {:.6E} | CONVERGENCE".format(
+                                    str(iteration).zfill(4), residual_evaluation, problem.tolerance))
                         # --- UPDATE INTERNAL VARIABLES
                         mgis_bv.update(material.mat_data)
                         print("+ ITERATIONS : {}".format(iteration + 1))
@@ -390,31 +427,54 @@ def solve_condensation(problem: Problem, material: Material, verbose: bool = Fal
                         for bc in problem.boundary_conditions:
                             problem.write_force_output(problem.res_folder_path, bc)
                         total_unknown_vector_previous_step = np.copy(total_unknown_vector)
-                        for element in problem.elements:
-                            element.cell_unknown_vector_backup = np.copy(element.cell_unknown_vector)
                         iteration = 0
                         time_step_temp = time_step + 0.
                         time_step_index += 1
                         num_total_skeleton_time_steps += 1
                         break_iteration = True
                     elif iteration == problem.number_of_iterations - 1:
-                        print("++++ ITER : {} | RES_MAX : {:.6E} | SPLITTING TIME STEP".format(
-                            str(iteration).zfill(4), residual_evaluation))
-                        write_out_msg("++++ ITER : {} | RES_MAX : {:.6E} | SPLITTING TIME STEP".format(
-                            str(iteration).zfill(4), residual_evaluation))
+                        if num_local_iterations > 0:
+                            print(
+                                "++++ ITER : {} | MEAN_CELLS_ITERATIONS : {:.6E} | RES_MAX : {:.6E} | SPLITTING TIME STEP".format(
+                                    str(iteration).zfill(4), mean_num_cells_iterations, residual_evaluation))
+                            write_out_msg(
+                                "++++ ITER : {} | MEAN_CELLS_ITERATIONS : {:.6E} | RES_MAX : {:.6E} | SPLITTING TIME STEP".format(
+                                    str(iteration).zfill(4), mean_num_cells_iterations, residual_evaluation))
+                        else:
+                            print(
+                                "++++ ITER : {} | RES_MAX : {:.6E} | SPLITTING TIME STEP".format(
+                                    str(iteration).zfill(4), residual_evaluation))
+                            write_out_msg(
+                                "++++ ITER : {} | RES_MAX : {:.6E} | SPLITTING TIME STEP".format(
+                                    str(iteration).zfill(4), residual_evaluation))
+                        # print("++++ ITER : {} | RES_MAX : {:.6E} | SPLITTING TIME STEP".format(
+                        #     str(iteration).zfill(4), residual_evaluation))
+                        # write_out_msg("++++ ITER : {} | RES_MAX : {:.6E} | SPLITTING TIME STEP".format(
+                        #     str(iteration).zfill(4), residual_evaluation))
                         total_unknown_vector = np.copy(total_unknown_vector_previous_step)
-                        for element in problem.elements:
-                            element.cell_unknown_vector = np.copy(element.cell_unknown_vector_backup)
                         iteration = 0
                         problem.time_steps.insert(time_step_index, (time_step + time_step_temp) / 2.)
-                        step_time_stop = time.time()
                         break_iteration = True
                     else:
+                        if num_local_iterations > 0:
+                            print(
+                                "++++ ITER : {} | MEAN_CELLS_ITERATIONS : {:.6E} | RES_MAX : {:.6E}".format(
+                                    str(iteration).zfill(4), mean_num_cells_iterations, residual_evaluation))
+                            write_out_msg(
+                                "++++ ITER : {} | MEAN_CELLS_ITERATIONS : {:.6E} | RES_MAX : {:.6E}".format(
+                                    str(iteration).zfill(4), mean_num_cells_iterations, residual_evaluation))
+                        else:
+                            print(
+                                "++++ ITER : {} | RES_MAX : {:.6E}".format(
+                                    str(iteration).zfill(4), residual_evaluation))
+                            write_out_msg(
+                                "++++ ITER : {} | RES_MAX : {:.6E}".format(
+                                    str(iteration).zfill(4), residual_evaluation))
                         # --- SOLVE SYSTEM
-                        print("++++ ITER : {} | RES_MAX : {:.6E}".format(
-                            str(iteration).zfill(4), residual_evaluation))
-                        write_out_msg("++++ ITER : {} | RES_MAX : {:.6E}".format(
-                            str(iteration).zfill(4), residual_evaluation))
+                        # print("++++ ITER : {} | RES_MAX : {:.6E}".format(
+                        #     str(iteration).zfill(4), residual_evaluation))
+                        # write_out_msg("++++ ITER : {} | RES_MAX : {:.6E}".format(
+                        #     str(iteration).zfill(4), residual_evaluation))
                         sparse_global_matrix = csr_matrix(tangent_matrix)
                         scaling_factor = np.max(np.abs(tangent_matrix))
                         correction = spsolve(sparse_global_matrix / scaling_factor, residual / scaling_factor)
@@ -433,33 +493,21 @@ def solve_condensation(problem: Problem, material: Material, verbose: bool = Fal
                                     element.v_cell - element.m_cell_faces @ face_correction
                             )
                             # --- ADDING CORRECTION TO CURRENT DISPLACEMENT
-                            element.cell_unknown_vector += cell_correction
-                            if accelerate == 1:
-                                start_index = _constrained_system_size + _element_index * problem.finite_element.cell_basis_l.dimension * problem.field.field_dimension
-                                stop_index = _constrained_system_size + (_element_index + 1) * problem.finite_element.cell_basis_l.dimension * problem.field.field_dimension
-                                total_unknown_vector[start_index:stop_index] += cell_correction
-                            if accelerate == 2:
-                                element.accelerator.accelerate(element.cell_unknown_vector)
-                                # acceleration_u_cells[_element_index].accelerate(element.cell_unknown_vector)
+                            total_unknown_vector[element.cell_range[0]:element.cell_range[1]] += np.copy(cell_correction)
                         num_total_skeleton_iterations += 1
                         iteration += 1
                         # --------------------------------------------------------------------------------------------------
                         # ANDERSON ACCELERATE
                         # --------------------------------------------------------------------------------------------------
-                        if accelerate > 0:
+                        if accelerate > 0 and num_local_iterations > 0:
+                            acceleration_u.accelerate(total_unknown_vector[:_constrained_system_size])
+                        elif accelerate > 0 and num_local_iterations == 0:
                             acceleration_u.accelerate(total_unknown_vector)
-                            if accelerate == 1:
-                                for _element_index, element in enumerate(problem.elements):
-                                    start_index = _constrained_system_size + _element_index * problem.finite_element.cell_basis_l.dimension * problem.field.field_dimension
-                                    stop_index = _constrained_system_size + (_element_index + 1) * problem.finite_element.cell_basis_l.dimension * problem.field.field_dimension
-                                    element.cell_unknown_vector = total_unknown_vector[start_index:stop_index]
                 else:
                     print("+ SPLITTING TIME STEP")
                     write_out_msg("+ SPLITTING TIME STEP")
                     problem.time_steps.insert(time_step_index, (time_step + time_step_temp) / 2.)
                     total_unknown_vector = np.copy(total_unknown_vector_previous_step)
-                    for element in problem.elements:
-                        element.cell_unknown_vector = np.copy(element.cell_unknown_vector_backup)
                     iteration = 0
                 # --- END OF ITERATION
             # --- END OF TIME STEP
