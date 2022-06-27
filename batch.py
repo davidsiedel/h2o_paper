@@ -13,7 +13,7 @@ from h2o.problem.solve.solve_condensation_axi import solve_condensation as solve
 
 from mgis import behaviour as mgis_bv
 
-batch = "4"
+batch = "6"
 
 algorithm_rule = {
     "Explicit": 0,
@@ -33,6 +33,7 @@ jacobian_rule = {
 def solve_swelling_sphere(computation):
 
     # --- VALUES
+    # time_steps = np.linspace(0.0, 0.20238839836127986 * 5.0, 80, endpoint=True)
     time_steps = np.linspace(0.0, 0.20238839836127986, 40, endpoint=True)
     iterations = 200
 
@@ -83,7 +84,7 @@ def solve_swelling_sphere(computation):
         boundary_conditions=boundary_conditions,
         loads=loads,
         quadrature_type=QuadratureType.GAUSS,
-        tolerance=1.0e-8,
+        tolerance=1.0e-6,
         res_folder_path=get_current_res_folder_path() + "_{}_swelling_sphere__{}__hho{}__{}__{}__{}".format(
             batch,
             computation["mesh"],
@@ -167,7 +168,7 @@ def solve_notched_rod(computation):
         boundary_conditions=boundary_conditions,
         loads=loads,
         quadrature_type=QuadratureType.GAUSS,
-        tolerance=1.0e-8,
+        tolerance=1.0e-6,
         res_folder_path=get_current_res_folder_path() + "_{}_notched_rod__{}__hho{}__{}__{}__{}".format(
             batch,
             computation["mesh"],
@@ -231,7 +232,6 @@ computation_parameters = [
     {"mesh" : "coarse", "order": 3, "algorithm" : "Explicit", "jacobian" : "Elastic", "acceleration": "Accelerated"},
     {"mesh" : "coarse", "order": 3, "algorithm" : "Implicit", "jacobian" : "Elastic", "acceleration": "NonAccelerated"},
     {"mesh" : "coarse", "order": 3, "algorithm" : "Implicit", "jacobian" : "Elastic", "acceleration": "Accelerated"},
-    # LOCAL ACCELERATION
 ]
 
 for computation in computation_parameters:

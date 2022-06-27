@@ -79,9 +79,9 @@ mat = Material(
     stabilization_parameter=stabilization_parameter,
     lagrange_parameter=parameters["YoungModulus"],
     field=displacement,
-    integration_type=mgis_bv.IntegrationType.IntegrationWithElasticOperator,
+    integration_type=mgis_bv.IntegrationType.IntegrationWithConsistentTangentOperator,
     parameters=None,
 )
 
 # --- SOLVE
-solve(p, mat, verbose=False, debug_mode=DebugMode.NONE, accelerate=1, num_local_iterations=20)
+solve(p, mat, verbose=False, debug_mode=DebugMode.NONE, accelerate=0, num_local_iterations=40)

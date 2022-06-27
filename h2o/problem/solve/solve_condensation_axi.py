@@ -106,15 +106,9 @@ def solve_condensation(
                         # INTEGRATION
                         # --------------------------------------------------------------------------------------------------
                         _io: int = problem.finite_element.computation_integration_order
-                        cell_quadrature_size = element.cell.get_quadrature_size(
-                            _io, quadrature_type=problem.quadrature_type
-                        )
-                        cell_quadrature_points = element.cell.get_quadrature_points(
-                            _io, quadrature_type=problem.quadrature_type
-                        )
-                        cell_quadrature_weights = element.cell.get_quadrature_weights(
-                            _io, quadrature_type=problem.quadrature_type
-                        )
+                        cell_quadrature_size = element.cell.get_quadrature_size(_io, quadrature_type=problem.quadrature_type)
+                        cell_quadrature_points = element.cell.get_quadrature_points(_io, quadrature_type=problem.quadrature_type)
+                        cell_quadrature_weights = element.cell.get_quadrature_weights(_io, quadrature_type=problem.quadrature_type)
                         x_c: ndarray = element.cell.get_centroid()
                         bdc: ndarray = element.cell.get_bounding_box()
                         element_stiffness_matrix = np.zeros((element.element_size, element.element_size), dtype=real)
@@ -176,21 +170,32 @@ def solve_condensation(
                     local_external_forces_coefficient = 1.
                     local_tolerance = 1.e-6
                     local_iteration = 0
+                    factor = material.stabilization_parameter / np.prod(bdc)
+                    factor = 1.0 / np.prod(bdc)
+                    # factor = 1.0
                     while local_iteration < num_local_iterations and not break_iteration:
                         R_cc = (element_internal_forces - element_external_forces)[:_c0_c]
                         # if local_external_forces_coefficient == 0.0:
                         #     local_external_forces_coefficient = 1.0
                         # local_external_forces_coefficient = 1.0 / np.prod(bdc)
-                        local_residual_evaluation = np.max(np.abs(R_cc)) * np.prod(bdc)
+                        # if local_iteration == 0:
+                        #     factor = np.max(np.abs(R_cc))
+                        #     factor = 1.0
+                        # local_residual_evaluation = np.max(np.abs(R_cc)) * np.prod(bdc)
+                        local_residual_evaluation = np.max(np.abs(R_cc)) / factor
+                        # print(_element_index, local_iteration, local_residual_evaluation)
+                        # local_residual_evaluation = np.max(np.abs(R_cc))
                         if local_residual_evaluation < local_tolerance:
                             break
                         else:
+                            # print("local inversion")
                             element_stiffness_matrix, element_internal_forces, element_external_forces, break_iteration = make_cell_procedure(break_iteration)
                             K_cc = element_stiffness_matrix[:_c0_c, :_c0_c]
                             R_cc = (element_internal_forces - element_external_forces)[:_c0_c]
                             cell_correction = np.linalg.solve(-K_cc, R_cc)
                             total_unknown_vector[element.cell_range[0]:element.cell_range[1]] += cell_correction
                             num_cells_iterations += 1
+                            local_iteration += 1
                     if not break_iteration:
                         # --- BOUNDARY CONDITIONS
                         for boundary_condition in problem.boundary_conditions:
@@ -489,9 +494,64 @@ def solve_condensation(
                                 _c0_fl = _i_local * (_fk * _dx)
                                 _c1_fl = (_i_local + 1) * (_fk * _dx)
                                 face_correction[_c0_fl:_c1_fl] += correction[_c0_fg:_c1_fg]
-                            cell_correction = element.m_cell_cell_inv @ (
-                                    element.v_cell - element.m_cell_faces @ face_correction
-                            )
+                            cell_correction = np.zeros((_c0_c,), dtype=real)
+                            if num_local_iterations == 0:
+                                cell_correction = element.m_cell_cell_inv @ (
+                                        element.v_cell - element.m_cell_faces @ face_correction
+                                )
+                            else:
+                                _io: int = problem.finite_element.computation_integration_order
+                                cell_quadrature_size = element.cell.get_quadrature_size(_io, quadrature_type=problem.quadrature_type)
+                                cell_quadrature_points = element.cell.get_quadrature_points(_io, quadrature_type=problem.quadrature_type)
+                                cell_quadrature_weights = element.cell.get_quadrature_weights(_io, quadrature_type=problem.quadrature_type)
+                                x_c: ndarray = element.cell.get_centroid()
+                                bdc: ndarray = element.cell.get_bounding_box()
+                                for _qc in range(cell_quadrature_size):
+                                    _qp = element.quad_p_indices[_qc]
+                                    _w_q_c = cell_quadrature_weights[_qc]
+                                    _x_q_c = cell_quadrature_points[:, _qc]
+                                    w_coef = _w_q_c
+                                    if problem.field.field_type in [FieldType.DISPLACEMENT_LARGE_STRAIN_AXISYMMETRIC, FieldType.DISPLACEMENT_SMALL_STRAIN_AXISYMMETRIC]:
+                                        w_coef *= 2.0 * np.pi * _x_q_c[0]
+                                    element_stiffness_matrix += w_coef * (
+                                            element.gradients_operators[_qc].T @ material.mat_data.K[_qp] @
+                                            element.gradients_operators[_qc]
+                                    )
+                                    # --- COMPUTE STIFFNESS MATRIX CONTRIBUTION AT QUADRATURE POINT
+                                    element_internal_forces += w_coef * (
+                                            element.gradients_operators[_qc].T @ material.mat_data.s1.thermodynamic_forces[_qp]
+                                    )
+                                    # --- COMPUTE EXTERNAL FORCES
+                                    v = problem.finite_element.cell_basis_l.evaluate_function(_x_q_c, x_c, bdc)
+                                    for load in problem.loads:
+                                        vl = w_coef * v * load.function(time_step, _x_q_c)
+                                        _re0 = load.direction * _cl
+                                        _re1 = (load.direction + 1) * _cl
+                                        element_external_forces[_re0:_re1] += vl
+                                # GET ELEMENT CONTRIBS
+                                stab_param = material.stabilization_parameter
+                                # --- ADDING STABILIZATION CONTRIBUTION AT THE ELEMENT LEVEL
+                                element_stiffness_matrix += stab_param * element.stabilization_operator
+                                # --- ADDING STABILIZATION CONTRIBUTION AT THE ELEMENT LEVEL
+                                element_internal_forces += (
+                                        stab_param
+                                        * element.stabilization_operator
+                                        @ element.get_element_unknown_vector(total_unknown_vector)
+                                )
+                                m_cell_cell = element_stiffness_matrix[:_c0_c, :_c0_c]
+                                m_cell_faces = element_stiffness_matrix[:_c0_c, _c0_c:]
+                                m_faces_cell = element_stiffness_matrix[_c0_c:, :_c0_c]
+                                m_faces_faces = element_stiffness_matrix[_c0_c:, _c0_c:]
+                                v_cell = -element_residual[:_c0_c]
+                                v_faces = -element_residual[_c0_c:]
+                                m_cell_cell_inv = np.linalg.inv(m_cell_cell)
+                                cell_correction = m_cell_cell_inv @ (v_cell - m_cell_faces @ face_correction)
+                                # factor = 1.0
+                                # face_unknowns = element.get_element_unknown_vector(total_unknown_vector)[_c0_c:]
+                                # cell_unknowns = total_unknown_vector[element.cell_range[0]:element.cell_range[1]]
+                                # K_update = element.stabilization_operator[:_c0_c, :_c0_c]
+                                # R_update = factor * element.stabilization_operator[:_c0_c, _c0_c:] @ face_correction
+                                # cell_correction = - np.linalg.inv(K_update) @ R_update
                             # --- ADDING CORRECTION TO CURRENT DISPLACEMENT
                             total_unknown_vector[element.cell_range[0]:element.cell_range[1]] += np.copy(cell_correction)
                         num_total_skeleton_iterations += 1
